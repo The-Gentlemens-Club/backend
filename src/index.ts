@@ -4,14 +4,14 @@ import { createServer } from 'http';
 import dotenv from 'dotenv';
 import gameRoutes from './routes/game';
 import tokenRoutes from './routes/token';
-import tournamentRoutes from './routes/tournaments';
+import { tournamentRouter } from './routes/tournaments';
 import statsRoutes from './routes/stats';
 import notificationRoutes from './routes/notifications';
 import { errorHandler } from './middleware/errorHandler';
 import { initWebSocket } from './routes/notifications';
-import { achievementRouter } from './routes/achievements';
+import achievementRouter from './routes/achievements';
 import { config } from './config';
-import userRouter from './routes/users';
+import { userRouter } from './routes/users';
 
 // Load environment variables
 dotenv.config();
@@ -31,7 +31,7 @@ initWebSocket(server);
 // Routes
 app.use('/api/game', gameRoutes);
 app.use('/api/token', tokenRoutes);
-app.use('/api/tournaments', tournamentRoutes);
+app.use('/api/tournaments', tournamentRouter);
 app.use('/api/stats', statsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/achievements', achievementRouter);

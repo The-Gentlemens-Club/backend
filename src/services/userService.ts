@@ -28,6 +28,17 @@ export class UserService {
     return profile;
   }
 
+  public async updateProfile(address: string, updates: Partial<UserProfile>): Promise<UserProfile> {
+    const profile = await this.getUserProfile(address);
+    if (!profile) {
+      throw new Error('User not found');
+    }
+
+    const updatedProfile = { ...profile, ...updates };
+    this.users.set(address, updatedProfile);
+    return updatedProfile;
+  }
+
   public async updateStats(address: string, update: Partial<UserStats>): Promise<void> {
     const profile = await this.getUserProfile(address);
     if (!profile) return;
@@ -47,6 +58,17 @@ export class UserService {
     }
 
     this.users.set(address, profile);
+  }
+
+  public async updateSettings(address: string, settings: UserSettings): Promise<UserSettings> {
+    const profile = await this.getUserProfile(address);
+    if (!profile) {
+      throw new Error('User not found');
+    }
+
+    profile.settings = settings;
+    this.users.set(address, profile);
+    return settings;
   }
 
   private initializeUserProfile(address: string): UserProfile {
@@ -154,5 +176,9 @@ export class UserService {
         this.sessions.delete(token);
       }
     }
+  }
+
+  public async getAllSessions(address: string): Promise<UserSession[]> {
+    return Array.from(this.sessions.values()).filter(session => session.address === address);
   }
 } 
