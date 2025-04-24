@@ -28,7 +28,7 @@ export class TournamentService {
       allowRebuys: boolean;
     }
   ): Promise<Tournament> {
-    const tournamentId = await this.contractService.createTournament(
+    const txHash = await this.contractService.createTournament(
       name,
       description,
       startTime,
@@ -40,7 +40,7 @@ export class TournamentService {
     );
 
     const tournament: Tournament = {
-      id: tournamentId,
+      id: txHash,
       name,
       description,
       startTime,
@@ -51,23 +51,26 @@ export class TournamentService {
       maxPlayers,
       status: TournamentStatus.UPCOMING,
       players: [],
+      winners: [],
       rules
     };
 
-    this.tournaments.set(tournamentId, tournament);
+    this.tournaments.set(tournament.id, tournament);
     return tournament;
   }
 
   public async joinTournament(tournamentId: string, playerAddress: string, entryFee: bigint): Promise<void> {
-    await this.contractService.joinTournament(tournamentId, playerAddress, entryFee);
-    const tournament = this.tournaments.get(tournamentId);
-    if (tournament) {
-      tournament.players.push(playerAddress);
-      this.tournaments.set(tournamentId, tournament);
+    const tournament = await this.getTournament(tournamentId);
+    if (!tournament) {
+      throw new Error('Tournament not found');
     }
+
+    await this.contractService.joinTournament(Number(tournamentId), entryFee);
+    tournament.players.push(playerAddress);
+    this.tournaments.set(tournamentId, tournament);
   }
 
-  public async getTournament(tournamentId: string): Promise<Tournament | undefined> {
+  public async getTournament(tournamentId: string): Promise<Tournament | null> {
     const tournament = this.tournaments.get(tournamentId);
     if (!tournament) {
       const contractTournament = await this.contractService.getTournament(BigInt(tournamentId));
@@ -76,7 +79,7 @@ export class TournamentService {
         return contractTournament;
       }
     }
-    return tournament;
+    return tournament || null;
   }
 
   public async getAllTournaments(): Promise<Tournament[]> {
@@ -95,7 +98,7 @@ export class TournamentService {
     return await this.contractService.getRegisteredPlayers(BigInt(tournamentId));
   }
 
-  public async getTournamentWinners(tournamentId: string): Promise<string[]> {
+  public async getTournamentWinners(tournamentId: string): Promise<{ address: string; prize: bigint; rank: number }[]> {
     return await this.contractService.getTournamentWinners(BigInt(tournamentId));
   }
 
@@ -103,20 +106,12 @@ export class TournamentService {
     return await this.contractService.getTournamentLeaderboard(BigInt(tournamentId));
   }
 
-  public async scheduleTournament(tournamentId: string): Promise<void> {
-    // Implementation for scheduling tournament
-  }
-
-  public async scheduleStatusUpdates(tournamentId: string): Promise<void> {
-    // Implementation for scheduling status updates
-  }
-
-  async getTournamentAnalytics(tournamentId: number): Promise<{
+  public async getTournamentAnalytics(tournamentId: string): Promise<{
     totalPlayers: number;
     totalPrizePool: bigint;
     averageEntryFee: bigint;
     startTime: Date;
-    endTime: Date;
+    endTime: Date | null;
     playerDistribution: {
       rank: number;
       count: number;
@@ -125,9 +120,13 @@ export class TournamentService {
     completionRate: number;
   }> {
     try {
-      const tournament = await this.contractService.getTournamentInfo(tournamentId);
-      const players = await this.contractService.getRegisteredPlayers(tournamentId);
-      const winners = await this.contractService.getTournamentWinners(tournamentId);
+      const tournament = await this.getTournament(tournamentId);
+      if (!tournament) {
+        throw new Error('Tournament not found');
+      }
+
+      const players = await this.getRegisteredPlayers(tournamentId);
+      const winners = await this.getTournamentWinners(tournamentId);
 
       const playerDistribution = this.calculatePlayerDistribution(players.length, tournament.maxPlayers);
       const participationRate = (players.length / tournament.maxPlayers) * 100;
@@ -154,44 +153,18 @@ export class TournamentService {
     maxPlayers: number
   ): { rank: number; count: number }[] {
     const ranks = [1, 2, 3, 4, 5];
-    const distribution = ranks.map(rank => ({
+    return ranks.map(rank => ({
       rank,
       count: Math.floor((currentPlayers / maxPlayers) * (100 / rank))
     }));
-    return distribution;
   }
 
-  async getPlayerRankings(
-    tournamentId: number,
-    limit: number = 10
-  ): Promise<{
-    address: string;
-    score: number;
-    rank: number;
-    gamesPlayed: number;
-    winRate: number;
-  }[]> {
-    try {
-      const leaderboard = await this.contractService.getTournamentLeaderboard(tournamentId);
-      return leaderboard.slice(0, limit).map((entry, index) => ({
-        address: entry.address,
-        score: entry.score,
-        rank: index + 1,
-        gamesPlayed: 0, // This would need to be fetched from the contract
-        winRate: 0 // This would need to be calculated from player stats
-      }));
-    } catch (error) {
-      console.error('Error getting player rankings:', error);
-      throw error;
-    }
-  }
-
-  async getTournamentSchedule(
+  public async getTournamentSchedule(
     startDate: Date,
     endDate: Date
   ): Promise<Tournament[]> {
     try {
-      const tournaments = await this.contractService.getTournaments();
+      const tournaments = await this.getAllTournaments();
       return tournaments.filter(t => 
         t.startTime >= startDate && 
         t.startTime <= endDate
@@ -202,7 +175,7 @@ export class TournamentService {
     }
   }
 
-  async getTournamentRecommendations(
+  public async getTournamentRecommendations(
     address: string,
     limit: number = 5
   ): Promise<Tournament[]> {

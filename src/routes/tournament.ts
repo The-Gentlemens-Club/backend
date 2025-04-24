@@ -21,7 +21,8 @@ const contractService = new ContractService(
 // Get all tournaments
 router.get('/', async (req, res) => {
   try {
-    const tournaments = await contractService.getTournaments();
+    const { offset = '0', limit = '10' } = req.query;
+    const tournaments = await contractService.getTournaments(Number(offset), Number(limit));
     res.json(tournaments);
   } catch (error) {
     res.status(500).json({ error: 'Failed to get tournaments' });
@@ -44,12 +45,26 @@ router.get('/:id', async (req, res) => {
 // Create new tournament
 router.post('/', authenticate(userService), async (req, res) => {
   try {
-    const { entryFee, maxPlayers, startTime, endTime } = req.body;
-    const txHash = await contractService.createTournament(
-      BigInt(entryFee),
+    const {
+      name,
+      description,
+      startTime,
+      entryFee,
+      prizePool,
+      minPlayers,
       maxPlayers,
+      rules
+    } = req.body;
+
+    const txHash = await contractService.createTournament(
+      name,
+      description,
       new Date(startTime),
-      new Date(endTime)
+      BigInt(entryFee),
+      BigInt(prizePool),
+      minPlayers,
+      maxPlayers,
+      rules
     );
     res.json({ txHash });
   } catch (error) {
@@ -60,7 +75,11 @@ router.post('/', authenticate(userService), async (req, res) => {
 // Join tournament
 router.post('/:id/join', authenticate(userService), async (req, res) => {
   try {
-    const txHash = await contractService.joinTournament(BigInt(req.params.id));
+    const { entryFee } = req.body;
+    const txHash = await contractService.joinTournament(
+      Number(req.params.id),
+      BigInt(entryFee)
+    );
     res.json({ txHash });
   } catch (error) {
     res.status(500).json({ error: 'Failed to join tournament' });

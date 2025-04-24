@@ -28,13 +28,10 @@ export interface PlayerStats {
   currentStreak: number;
   bestStreak: number;
   lastGamePlayed: Date;
-  averageBet?: bigint;
   level: number;
   experience: number;
   rank: string;
-  tournamentsPlayed?: number;
   tournamentsWon?: number;
-  achievements?: Achievement[];
 }
 
 export interface GameConfig {

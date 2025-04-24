@@ -1,7 +1,7 @@
 export enum TournamentStatus {
-  UPCOMING = 'upcoming',
-  ACTIVE = 'active',
-  COMPLETED = 'completed'
+  UPCOMING = 'UPCOMING',
+  ACTIVE = 'ACTIVE',
+  COMPLETED = 'COMPLETED'
 }
 
 export interface Tournament {
@@ -16,16 +16,14 @@ export interface Tournament {
   maxPlayers: number;
   status: TournamentStatus;
   players: string[];
-  winners?: string[];
-  rules: TournamentRules;
-}
-
-export interface TournamentRules {
-  minBet: bigint;
-  maxBet: bigint;
-  timeLimit: number;
-  maxRounds: number;
-  allowRebuys: boolean;
+  winners?: { address: string; prize: bigint; rank: number }[];
+  rules: {
+    minBet: bigint;
+    maxBet: bigint;
+    timeLimit: number;
+    maxRounds: number;
+    allowRebuys: boolean;
+  };
 }
 
 export interface TournamentStats {
@@ -35,4 +33,30 @@ export interface TournamentStats {
   averageEntryFee: bigint;
   completedGames: bigint;
   activeGames: bigint;
+}
+
+export interface TournamentHistory {
+  tournamentId: string;
+  name: string;
+  startTime: Date;
+  endTime: Date | null;
+  entryFee: bigint;
+  prizePool: bigint;
+  players: string[];
+  winners: { address: string; prize: bigint; rank: number }[];
+  stats: TournamentStats;
+}
+
+export interface TournamentRules {
+  minPlayers: number;
+  maxPlayers: number;
+  entryFee: bigint;
+  prizePool: bigint;
+  startTime?: Date;
+  endTime?: Date;
+  minBet: bigint;
+  maxBet: bigint;
+  timeLimit: number;
+  maxRounds: number;
+  allowRebuys: boolean;
 } 

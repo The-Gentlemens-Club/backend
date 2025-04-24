@@ -1,6 +1,9 @@
-import { ContractService } from './contracts';
-import { Tournament, TournamentStats } from '../types/tournament';
+import { ContractService } from './contractService';
+import { Tournament, TournamentStatus, TournamentStats } from '../types/tournament';
 import { PlayerStats } from '../types/game';
+import { NotificationService } from './notificationService';
+import { UserService } from './userService';
+import { config } from '../config';
 
 export interface TournamentHistory {
   tournamentId: string;
@@ -10,7 +13,7 @@ export interface TournamentHistory {
   entryFee: bigint;
   prizePool: bigint;
   players: string[];
-  winners: string[];
+  winners: { address: string; prize: bigint; rank: number }[];
   stats: TournamentStats;
 }
 
@@ -20,14 +23,27 @@ export class TournamentHistoryService {
   private playerHistory: Map<string, string[]> = new Map();
 
   constructor() {
-    this.contractService = new ContractService();
+    const notificationService = new NotificationService();
+    const userService = new UserService(notificationService);
+    this.contractService = new ContractService(
+      config.rpcUrl,
+      config.tournamentContractAddress,
+      config.gameContractAddress,
+      userService,
+      notificationService,
+      config.jwtSecret
+    );
   }
 
   async recordTournament(tournamentId: string): Promise<void> {
     try {
-      const tournament = await this.contractService.getTournamentInfo(Number(tournamentId));
-      const players = await this.contractService.getRegisteredPlayers(Number(tournamentId));
-      const winners = await this.contractService.getTournamentWinners(Number(tournamentId));
+      const tournament = await this.contractService.getTournament(BigInt(tournamentId));
+      if (!tournament) {
+        throw new Error('Tournament not found');
+      }
+
+      const players = await this.contractService.getRegisteredPlayers(BigInt(tournamentId));
+      const winners = await this.contractService.getTournamentWinners(BigInt(tournamentId));
 
       const playerStats = await Promise.all(
         players.map(async (address) => {
@@ -48,15 +64,15 @@ export class TournamentHistoryService {
         name: tournament.name,
         startTime: tournament.startTime,
         endTime: tournament.endTime,
-        entryFee: BigInt(tournament.entryFee),
-        prizePool: tournament.prizePool ? BigInt(tournament.prizePool) : 0n,
+        entryFee: tournament.entryFee,
+        prizePool: tournament.prizePool,
         players: players,
-        winners: winners.map((winner) => winner.address),
+        winners: winners,
         stats: {
           totalPlayers: BigInt(players.length),
           activePlayers: BigInt(players.length),
-          totalPrizePool: tournament.prizePool ? BigInt(tournament.prizePool) : 0n,
-          averageEntryFee: BigInt(tournament.entryFee),
+          totalPrizePool: tournament.prizePool,
+          averageEntryFee: tournament.entryFee,
           completedGames: BigInt(0),
           activeGames: BigInt(players.length)
         }
@@ -84,17 +100,17 @@ export class TournamentHistoryService {
       name: tournament.name,
       startTime: tournament.startTime,
       endTime: tournament.endTime,
-      entryFee: BigInt(tournament.entryFee),
-      prizePool: tournament.prizePool ? BigInt(tournament.prizePool) : 0n,
+      entryFee: tournament.entryFee,
+      prizePool: tournament.prizePool,
       players: tournament.players,
       winners: tournament.winners || [],
       stats: {
-        totalPlayers: 0n,
-        activePlayers: 0n,
-        totalPrizePool: 0n,
-        averageEntryFee: 0n,
-        completedGames: 0n,
-        activeGames: 0n
+        totalPlayers: BigInt(tournament.players.length),
+        activePlayers: BigInt(tournament.players.length),
+        totalPrizePool: tournament.prizePool,
+        averageEntryFee: tournament.entryFee,
+        completedGames: BigInt(0),
+        activeGames: BigInt(tournament.players.length)
       }
     };
 
@@ -123,23 +139,24 @@ export class TournamentHistoryService {
     const stats: PlayerStats = {
       address: playerAddress,
       totalGames: history.length,
-      wins: history.filter(t => t.winners.includes(playerAddress)).length,
+      wins: history.filter(t => t.winners.some(w => w.address === playerAddress)).length,
       losses: 0,
       draws: 0,
-      totalBetAmount: 0n,
+      totalBetAmount: history.reduce((sum, t) => sum + t.entryFee, 0n),
       totalWinAmount: history.reduce((sum, t) => {
-        if (t.winners.includes(playerAddress)) {
-          return sum + (t.prizePool / BigInt(t.winners.length));
-        }
-        return sum;
+        const winner = t.winners.find(w => w.address === playerAddress);
+        return winner ? sum + winner.prize : sum;
       }, 0n),
       winRate: history.length > 0 
-        ? Number(history.filter(t => t.winners.includes(playerAddress)).length) / history.length
+        ? history.filter(t => t.winners.some(w => w.address === playerAddress)).length / history.length
         : 0,
-      highestWin: 0n,
+      highestWin: history.reduce((max, t) => {
+        const winner = t.winners.find(w => w.address === playerAddress);
+        return winner && winner.prize > max ? winner.prize : max;
+      }, 0n),
       currentStreak: 0,
       bestStreak: 0,
-      lastGamePlayed: new Date(),
+      lastGamePlayed: history.length > 0 ? history[0].startTime : new Date(),
       level: 1,
       experience: 0,
       rank: 'Novice'
@@ -215,10 +232,10 @@ export class TournamentHistoryService {
 
     histories.forEach(history => {
       history.winners.forEach(winner => {
-        const stats = playerStats.get(winner) || { tournamentsWon: 0, totalPrize: BigInt(0) };
+        const stats = playerStats.get(winner.address) || { tournamentsWon: 0, totalPrize: BigInt(0) };
         stats.tournamentsWon++;
-        stats.totalPrize += history.prizePool;
-        playerStats.set(winner, stats);
+        stats.totalPrize += winner.prize;
+        playerStats.set(winner.address, stats);
       });
     });
 
