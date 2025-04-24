@@ -44,7 +44,9 @@ export class AnalyticsService {
     const stats = await this.contractService.getPlayerStats(address);
     const tournaments = await this.tournamentService.getAllTournaments();
     const playerTournaments = tournaments.filter(t => t.players.includes(address));
-    const tournamentsWon = tournaments.filter(t => t.winners?.includes(address));
+    const tournamentsWon = tournaments.filter(t => 
+      t.winners?.some(winner => winner.address === address)
+    );
 
     return {
       totalGames: stats.totalGames,
