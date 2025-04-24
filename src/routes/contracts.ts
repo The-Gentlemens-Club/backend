@@ -1,147 +1,105 @@
 import { Router } from 'express';
 import { ContractService } from '../services/contractService';
-import { authenticate, requireRole } from '../middleware/auth';
 import { UserService } from '../services/userService';
+import { NotificationService } from '../services/notificationService';
+import { authenticate } from '../middleware/auth';
+import { config } from '../config';
 
 const router = Router();
 
-export const initContractRoutes = (contractService: ContractService, userService: UserService) => {
-  const auth = authenticate(userService);
+const notificationService = new NotificationService();
+const userService = new UserService(notificationService);
+const contractService = new ContractService(
+  config.rpcUrl,
+  config.tournamentContractAddress,
+  config.gameContractAddress,
+  userService,
+  notificationService,
+  config.jwtSecret
+);
 
-  // Tournament routes
-  router.post('/tournaments', auth, requireRole(['admin']), async (req, res) => {
-    try {
-      const { name, entryFee, startTime } = req.body;
-      const privateKey = process.env.ADMIN_PRIVATE_KEY;
+// Create tournament
+router.post('/tournament', authenticate(userService), async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      startTime,
+      entryFee,
+      prizePool,
+      minPlayers,
+      maxPlayers,
+      rules
+    } = req.body;
 
-      if (!privateKey) {
-        throw new Error('Admin private key not configured');
-      }
+    const tournamentId = await contractService.createTournament(
+      name,
+      description,
+      new Date(startTime),
+      BigInt(entryFee),
+      BigInt(prizePool),
+      minPlayers,
+      maxPlayers,
+      rules
+    );
 
-      const txHash = await contractService.createTournament(
-        privateKey,
-        name,
-        BigInt(entryFee),
-        new Date(startTime)
-      );
+    res.json({ tournamentId });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create tournament' });
+  }
+});
 
-      res.json({ txHash });
-    } catch (error) {
-      console.error('Create tournament error:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to create tournament' });
+// Get tournament
+router.get('/tournament/:id', async (req, res) => {
+  try {
+    const tournament = await contractService.getTournament(BigInt(req.params.id));
+    if (!tournament) {
+      return res.status(404).json({ error: 'Tournament not found' });
     }
-  });
+    res.json(tournament);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get tournament' });
+  }
+});
 
-  router.post('/tournaments/:id/join', auth, async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { entryFee } = req.body;
-      const privateKey = req.headers['x-private-key'] as string;
+// Get tournament players
+router.get('/tournament/:id/players', async (req, res) => {
+  try {
+    const players = await contractService.getRegisteredPlayers(BigInt(req.params.id));
+    res.json(players);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get tournament players' });
+  }
+});
 
-      if (!privateKey) {
-        return res.status(400).json({ error: 'Private key required' });
-      }
+// Get tournament winners
+router.get('/tournament/:id/winners', async (req, res) => {
+  try {
+    const winners = await contractService.getTournamentWinners(BigInt(req.params.id));
+    res.json(winners);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get tournament winners' });
+  }
+});
 
-      const txHash = await contractService.joinTournament(
-        privateKey,
-        BigInt(id),
-        BigInt(entryFee)
-      );
+// Get player stats
+router.get('/player/:address/stats', async (req, res) => {
+  try {
+    const stats = await contractService.getPlayerStats(req.params.address);
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get player stats' });
+  }
+});
 
-      res.json({ txHash });
-    } catch (error) {
-      console.error('Join tournament error:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to join tournament' });
-    }
-  });
+// Get tournament leaderboard
+router.get('/tournament/:id/leaderboard', async (req, res) => {
+  try {
+    const leaderboard = await contractService.getTournamentLeaderboard(BigInt(req.params.id));
+    res.json(leaderboard);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get tournament leaderboard' });
+  }
+});
 
-  router.get('/tournaments/:id', auth, async (req, res) => {
-    try {
-      const { id } = req.params;
-      const tournament = await contractService.getTournament(BigInt(id));
-      res.json(tournament);
-    } catch (error) {
-      console.error('Get tournament error:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to get tournament' });
-    }
-  });
-
-  router.get('/tournaments/:id/players', auth, async (req, res) => {
-    try {
-      const { id } = req.params;
-      const players = await contractService.getTournamentPlayers(BigInt(id));
-      res.json(players);
-    } catch (error) {
-      console.error('Get tournament players error:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to get tournament players' });
-    }
-  });
-
-  router.post('/tournaments/:id/distribute', auth, requireRole(['admin']), async (req, res) => {
-    try {
-      const { id } = req.params;
-      const privateKey = process.env.ADMIN_PRIVATE_KEY;
-
-      if (!privateKey) {
-        throw new Error('Admin private key not configured');
-      }
-
-      const txHash = await contractService.distributePrizes(privateKey, BigInt(id));
-      res.json({ txHash });
-    } catch (error) {
-      console.error('Distribute prizes error:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to distribute prizes' });
-    }
-  });
-
-  // Game routes
-  router.post('/games/play', auth, async (req, res) => {
-    try {
-      const { betAmount } = req.body;
-      const privateKey = req.headers['x-private-key'] as string;
-
-      if (!privateKey) {
-        return res.status(400).json({ error: 'Private key required' });
-      }
-
-      const txHash = await contractService.playGame(privateKey, BigInt(betAmount));
-      res.json({ txHash });
-    } catch (error) {
-      console.error('Play game error:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to play game' });
-    }
-  });
-
-  router.get('/games/history', auth, async (req, res) => {
-    try {
-      const history = await contractService.getGameHistory(req.user!.address);
-      res.json(history);
-    } catch (error) {
-      console.error('Get game history error:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to get game history' });
-    }
-  });
-
-  router.get('/games/last', auth, async (req, res) => {
-    try {
-      const lastPlayed = await contractService.getLastGamePlayed(req.user!.address);
-      res.json({ lastPlayed });
-    } catch (error) {
-      console.error('Get last game error:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to get last game' });
-    }
-  });
-
-  router.get('/games/:id/outcome', auth, async (req, res) => {
-    try {
-      const { id } = req.params;
-      const outcome = await contractService.getGameOutcome(BigInt(id));
-      res.json({ outcome });
-    } catch (error) {
-      console.error('Get game outcome error:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to get game outcome' });
-    }
-  });
-
-  return router;
-}; 
+export default router; 
