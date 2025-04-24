@@ -4,6 +4,7 @@ import { PlayerStatsService } from '../services/playerStatsService';
 import { TournamentHistoryService } from '../services/tournamentHistoryService';
 import { NotificationService } from '../services/notificationService';
 import { UserService } from '../services/userService';
+import { TournamentService } from '../services/tournamentService';
 import { config } from '../config';
 import { authenticate } from '../middleware/auth';
 
@@ -19,6 +20,7 @@ const contractService = new ContractService(
   notificationService,
   config.jwtSecret
 );
+const tournamentService = new TournamentService(contractService, userService, notificationService);
 const playerStatsService = new PlayerStatsService(contractService);
 const historyService = new TournamentHistoryService();
 
@@ -36,7 +38,7 @@ router.post('/', authenticate(userService), async (req, res) => {
       rules
     } = req.body;
 
-    const tournament = await contractService.createTournament(
+    const tournament = await tournamentService.createTournament(
       name,
       description,
       new Date(startTime),
@@ -87,8 +89,8 @@ router.post('/:id/join', authenticate(userService), async (req, res) => {
   try {
     const { id } = req.params;
     const { betAmount } = req.body;
-    const result = await contractService.joinTournament(id, BigInt(betAmount));
-    res.json(result);
+    await tournamentService.joinTournament(id, req.user!.address, BigInt(betAmount));
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to join tournament' });
   }
@@ -124,4 +126,4 @@ router.get('/player/:address/history', async (req, res) => {
   }
 });
 
-export default router; 
+export const tournamentRouter = router; 

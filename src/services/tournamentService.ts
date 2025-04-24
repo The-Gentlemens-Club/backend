@@ -1,58 +1,94 @@
-import { ContractService } from './contracts';
+import { ContractService } from './contractService';
 import { Tournament, TournamentStatus } from '../types/tournament';
+import { UserService } from './userService';
+import { NotificationService } from './notificationService';
 
 export class TournamentService {
-  private contractService: ContractService;
   private tournaments: Map<string, Tournament> = new Map();
 
-  constructor() {
-    this.contractService = new ContractService();
+  constructor(
+    private contractService: ContractService,
+    private userService: UserService,
+    private notificationService: NotificationService
+  ) {}
+
+  public async createTournament(
+    name: string,
+    description: string,
+    startTime: Date,
+    entryFee: bigint,
+    prizePool: bigint,
+    minPlayers: number,
+    maxPlayers: number,
+    rules: {
+      minBet: bigint;
+      maxBet: bigint;
+      timeLimit: number;
+      maxRounds: number;
+      allowRebuys: boolean;
+    }
+  ): Promise<Tournament> {
+    const tournamentId = await this.contractService.createTournament(
+      name,
+      description,
+      startTime,
+      entryFee,
+      prizePool,
+      minPlayers,
+      maxPlayers,
+      rules
+    );
+
+    const tournament: Tournament = {
+      id: tournamentId,
+      name,
+      description,
+      startTime,
+      endTime: null,
+      entryFee,
+      prizePool,
+      minPlayers,
+      maxPlayers,
+      status: TournamentStatus.UPCOMING,
+      players: [],
+      rules
+    };
+
+    this.tournaments.set(tournamentId, tournament);
+    return tournament;
   }
 
-  async scheduleTournament(
-    name: string,
-    entryFee: bigint,
-    maxPlayers: number,
-    startTime: Date,
-    duration: number = 24 // hours
-  ): Promise<string> {
-    try {
-      const tournamentId = await this.contractService.createTournament(
-        name,
-        entryFee,
-        maxPlayers,
-        startTime
-      );
-      
-      // Schedule status updates
-      this.scheduleStatusUpdates(Number(tournamentId), startTime, duration);
-      
-      return tournamentId;
-    } catch (error) {
-      console.error('Error scheduling tournament:', error);
-      throw error;
+  public async joinTournament(tournamentId: string, playerAddress: string, entryFee: bigint): Promise<void> {
+    await this.contractService.joinTournament(tournamentId, playerAddress, entryFee);
+    const tournament = this.tournaments.get(tournamentId);
+    if (tournament) {
+      tournament.players.push(playerAddress);
+      this.tournaments.set(tournamentId, tournament);
     }
   }
 
-  private async scheduleStatusUpdates(
-    tournamentId: number,
-    startTime: Date,
-    duration: number
-  ) {
-    const now = new Date();
-    const startDelay = startTime.getTime() - now.getTime();
-    const endDelay = startDelay + (duration * 60 * 60 * 1000);
+  public async getTournament(tournamentId: string): Promise<Tournament | undefined> {
+    return this.tournaments.get(tournamentId);
+  }
 
-    // Schedule start
-    setTimeout(async () => {
-      await this.contractService.updateTournamentStatus(tournamentId);
-    }, startDelay);
+  public async getAllTournaments(): Promise<Tournament[]> {
+    return Array.from(this.tournaments.values());
+  }
 
-    // Schedule end
-    setTimeout(async () => {
-      await this.contractService.updateTournamentStatus(tournamentId);
-      await this.contractService.distributePrizes(tournamentId);
-    }, endDelay);
+  public async updateTournamentStatus(tournamentId: string, status: TournamentStatus): Promise<void> {
+    const tournament = this.tournaments.get(tournamentId);
+    if (tournament) {
+      tournament.status = status;
+      this.tournaments.set(tournamentId, tournament);
+    }
+  }
+
+  public async scheduleTournament(tournamentId: string): Promise<void> {
+    // Implementation for scheduling tournament
+  }
+
+  public async scheduleStatusUpdates(tournamentId: string): Promise<void> {
+    // Implementation for scheduling status updates
   }
 
   async getTournamentAnalytics(tournamentId: number): Promise<{
@@ -174,35 +210,5 @@ export class TournamentService {
       console.error('Error getting tournament recommendations:', error);
       throw error;
     }
-  }
-
-  async createTournament(tournament: Tournament): Promise<void> {
-    this.tournaments.set(tournament.id, tournament);
-  }
-
-  async addPlayer(tournamentId: string, playerAddress: string): Promise<void> {
-    const tournament = this.tournaments.get(tournamentId);
-    if (!tournament) {
-      throw new Error('Tournament not found');
-    }
-    tournament.players.push(playerAddress);
-    this.tournaments.set(tournamentId, tournament);
-  }
-
-  async updateTournamentStatus(tournamentId: string, status: 'upcoming' | 'active' | 'completed'): Promise<void> {
-    const tournament = this.tournaments.get(tournamentId);
-    if (!tournament) {
-      throw new Error('Tournament not found');
-    }
-    tournament.status = status;
-    this.tournaments.set(tournamentId, tournament);
-  }
-
-  async getTournament(tournamentId: string): Promise<Tournament | undefined> {
-    return this.tournaments.get(tournamentId);
-  }
-
-  async getTournaments(): Promise<Tournament[]> {
-    return Array.from(this.tournaments.values());
   }
 } 

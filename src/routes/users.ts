@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { UserService } from '../services/userService';
 import { NotificationService } from '../services/notificationService';
 import { config } from '../config';
-import { authenticateToken } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
 
 const router = Router();
 const notificationService = new NotificationService();
@@ -49,7 +49,7 @@ router.post('/login', async (req, res) => {
 });
 
 // Get user profile
-router.get('/profile', authenticateToken, async (req, res) => {
+router.get('/profile', authenticate(userService), async (req, res) => {
   try {
     const profile = await userService.getUserProfile(req.user!.address);
     if (!profile) {
@@ -62,11 +62,15 @@ router.get('/profile', authenticateToken, async (req, res) => {
 });
 
 // Update user profile
-router.put('/profile', authenticateToken, async (req, res) => {
+router.put('/profile', authenticate(userService), async (req, res) => {
   try {
     const { username, email, avatarUrl, bio } = req.body;
-    const updates = { username, email, avatarUrl, bio };
-    const profile = await userService.updateStats(req.user!.address, updates);
+    const profile = await userService.updateProfile(req.user!.address, {
+      username,
+      email,
+      avatarUrl,
+      bio
+    });
     res.json(profile);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update user profile' });
@@ -74,10 +78,10 @@ router.put('/profile', authenticateToken, async (req, res) => {
 });
 
 // Update user settings
-router.put('/settings', authenticateToken, async (req, res) => {
+router.put('/settings', authenticate(userService), async (req, res) => {
   try {
     const { settings } = req.body;
-    const updatedSettings = await userService.updateStats(req.user!.address, { settings });
+    const updatedSettings = await userService.updateSettings(req.user!.address, settings);
     res.json(updatedSettings);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update user settings' });
@@ -85,7 +89,7 @@ router.put('/settings', authenticateToken, async (req, res) => {
 });
 
 // Get user sessions
-router.get('/sessions', authenticateToken, async (req, res) => {
+router.get('/sessions', authenticate(userService), async (req, res) => {
   try {
     const sessions = await userService.getAllSessions(req.user!.address);
     res.json(sessions);
@@ -95,7 +99,7 @@ router.get('/sessions', authenticateToken, async (req, res) => {
 });
 
 // End session
-router.delete('/sessions/:token', authenticateToken, async (req, res) => {
+router.delete('/sessions/:token', authenticate(userService), async (req, res) => {
   try {
     await userService.endSession(req.params.token);
     res.json({ success: true });
@@ -105,7 +109,7 @@ router.delete('/sessions/:token', authenticateToken, async (req, res) => {
 });
 
 // End all sessions
-router.delete('/sessions', authenticateToken, async (req, res) => {
+router.delete('/sessions', authenticate(userService), async (req, res) => {
   try {
     await userService.endAllSessions(req.user!.address);
     res.json({ success: true });

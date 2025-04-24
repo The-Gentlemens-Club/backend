@@ -152,10 +152,10 @@ export class TournamentHistoryService {
     const stats: TournamentStats = {
       totalPlayers: BigInt(new Set(tournaments.flatMap(t => t.players)).size),
       activePlayers: BigInt(new Set(tournaments.filter(t => !t.endTime).flatMap(t => t.players)).size),
-      totalPrizePool: tournaments.reduce((sum, t) => sum + t.prizePool, 0n).toString(),
+      totalPrizePool: tournaments.reduce((sum, t) => sum + t.prizePool, 0n),
       averageEntryFee: tournaments.length > 0
-        ? (tournaments.reduce((sum, t) => sum + t.entryFee, 0n) / BigInt(tournaments.length)).toString()
-        : '0',
+        ? tournaments.reduce((sum, t) => sum + t.entryFee, 0n) / BigInt(tournaments.length)
+        : 0n,
       completedGames: BigInt(tournaments.filter(t => t.endTime).length),
       activeGames: BigInt(tournaments.filter(t => !t.endTime).length)
     };
