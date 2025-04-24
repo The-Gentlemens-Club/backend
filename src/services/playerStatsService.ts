@@ -101,17 +101,38 @@ export class PlayerStatsService {
     this.stats.set(address, { ...currentStats, ...update });
   }
 
-  public async getLeaderboard(): Promise<PlayerStats[]> {
-    const allStats = Array.from(this.stats.values());
-    return allStats.sort((a, b) => {
-      if (a.winRate !== b.winRate) {
-        return b.winRate - a.winRate;
-      }
-      if (a.totalWinAmount !== b.totalWinAmount) {
-        return Number(b.totalWinAmount - a.totalWinAmount);
-      }
-      return b.totalGames - a.totalGames;
-    });
+  public async getLeaderboard(limit: number = 100): Promise<{
+    address: string;
+    rank: number;
+    winRate: number;
+    totalWon: bigint;
+    tournamentsWon: number;
+  }[]> {
+    const allPlayers = await this.contractService.getAllPlayers();
+    const playerStats = await Promise.all(
+      allPlayers.map(async (player) => {
+        const stats = await this.getPlayerStats(player);
+        return {
+          address: player,
+          rank: stats.rank,
+          winRate: stats.winRate,
+          totalWon: stats.totalWinAmount,
+          tournamentsWon: stats.tournamentsWon || 0
+        };
+      })
+    );
+
+    return playerStats
+      .sort((a, b) => {
+        if (a.rank !== b.rank) {
+          return a.rank - b.rank;
+        }
+        if (a.winRate !== b.winRate) {
+          return b.winRate - a.winRate;
+        }
+        return Number(b.totalWon - a.totalWon);
+      })
+      .slice(0, limit);
   }
 
   async getPlayerAchievements(address: string): Promise<Achievement[]> {
@@ -129,74 +150,18 @@ export class PlayerStatsService {
       isUnlocked: stats.bestStreak >= 10
     });
 
-    // Tournament Winner Achievement
-    achievements.push({
-      id: 'tournament_winner',
-      name: 'Tournament Champion',
-      description: 'Win a tournament',
-      unlockedAt: new Date(),
-      progress: stats.tournamentsWon,
-      maxProgress: 1,
-      isUnlocked: stats.tournamentsWon > 0
-    });
-
     // High Roller Achievement
     achievements.push({
       id: 'high_roller',
       name: 'High Roller',
       description: 'Place a bet of 1 ETH or more',
       unlockedAt: new Date(),
-      progress: Number(stats.averageBet),
+      progress: Number(stats.averageBet || 0n),
       maxProgress: Number(BigInt(1e18)), // 1 ETH
-      isUnlocked: stats.averageBet >= BigInt(1e18)
-    });
-
-    // Tournament Regular Achievement
-    achievements.push({
-      id: 'tournament_regular',
-      name: 'Tournament Regular',
-      description: 'Participate in 10 tournaments',
-      unlockedAt: new Date(),
-      progress: stats.tournamentsPlayed,
-      maxProgress: 10,
-      isUnlocked: stats.tournamentsPlayed >= 10
+      isUnlocked: (stats.averageBet || 0n) >= BigInt(1e18)
     });
 
     return achievements;
-  }
-
-  async getLeaderboard(limit: number = 100): Promise<{
-    address: string;
-    rank: number;
-    winRate: number;
-    totalWon: bigint;
-    tournamentsWon: number;
-  }[]> {
-    const allPlayers = await this.contractService.getAllPlayers();
-    const playerStats = await Promise.all(
-      allPlayers.map(async (player) => {
-        const stats = await this.getPlayerStats(player);
-        return {
-          address: player,
-          rank: stats.rank,
-          winRate: stats.winRate,
-          totalWon: stats.totalWinAmount,
-          tournamentsWon: stats.tournamentsWon
-        };
-      })
-    );
-
-    return playerStats
-      .sort((a, b) => {
-        if (a.rank !== b.rank) {
-          return a.rank - b.rank;
-        }
-        if (a.winRate !== b.winRate) {
-          return b.winRate - a.winRate;
-        }
-        return Number(b.totalWon - a.totalWon);
-      })
-      .slice(0, limit);
   }
 
   async getPlayerProgress(address: string): Promise<{
@@ -232,16 +197,8 @@ export class PlayerStatsService {
     // Bonus for wins
     experience += stats.wins * 20;
     
-    // Tournament experience
-    experience += stats.tournamentsPlayed * 50;
-    experience += stats.tournamentsWon * 100;
-    
     // Streak bonus
     experience += stats.bestStreak * 5;
-    
-    // Achievement bonus
-    const achievements = stats.achievements.filter(a => a.isUnlocked);
-    experience += achievements.length * 25;
 
     return experience;
   }

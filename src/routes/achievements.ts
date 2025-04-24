@@ -14,7 +14,8 @@ const contractService = new ContractService(
   config.tournamentContractAddress,
   config.gameContractAddress,
   userService,
-  notificationService
+  notificationService,
+  config.jwtSecret
 );
 
 const achievementService = new AchievementService(
@@ -38,8 +39,8 @@ router.get('/player/:address', async (req, res) => {
 router.post('/check/:address', async (req, res) => {
   try {
     const { address } = req.params;
-    const newAchievements = await achievementService.checkAchievements(address);
-    res.json(newAchievements);
+    await achievementService.checkAchievements(address);
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to check achievements' });
   }
