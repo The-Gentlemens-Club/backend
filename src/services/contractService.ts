@@ -3,6 +3,7 @@ import { Contract } from 'ethers';
 import { TournamentService } from './tournamentService';
 import { UserService } from './userService';
 import { NotificationService } from './notificationService';
+import { Tournament } from '../types/tournament';
 
 // Contract ABIs
 const TOURNAMENT_ABI = [
@@ -73,14 +74,16 @@ export class ContractService {
   private setupEventListeners() {
     // Tournament events
     this.tournamentContract.on('TournamentCreated', async (tournamentId, name, entryFee, startTime) => {
-      await this.tournamentService.createTournament({
+      const tournament: Tournament = {
         id: tournamentId.toString(),
         name,
         entryFee: entryFee.toString(),
-        startTime: new Date(startTime * 1000),
+        startTime: new Date(Number(startTime) * 1000),
+        endTime: new Date(Number(startTime) * 1000 + 24 * 60 * 60 * 1000), // 24 hours after start
         status: 'upcoming',
         players: []
-      });
+      };
+      await this.tournamentService.createTournament(tournament);
     });
 
     this.tournamentContract.on('PlayerJoined', async (tournamentId, player) => {
@@ -138,8 +141,8 @@ export class ContractService {
     return {
       name: tournament[0],
       entryFee: tournament[1].toString(),
-      startTime: new Date(tournament[2].toNumber() * 1000),
-      endTime: new Date(tournament[3].toNumber() * 1000),
+      startTime: new Date(Number(tournament[2]) * 1000),
+      endTime: new Date(Number(tournament[3]) * 1000),
       prizePool: tournament[4].toString(),
       status: this.getTournamentStatus(tournament[5])
     };
@@ -180,7 +183,7 @@ export class ContractService {
 
   async getLastGamePlayed(address: string): Promise<Date> {
     const timestamp = await this.gameContract.getLastGamePlayed(address);
-    return new Date(timestamp.toNumber() * 1000);
+    return new Date(Number(timestamp) * 1000);
   }
 
   async getGameOutcome(gameId: bigint): Promise<string> {
