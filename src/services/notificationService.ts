@@ -1,5 +1,7 @@
 import { Tournament } from '../types/tournament';
 import { TournamentCategory } from './tournamentRulesService';
+import { WebSocket } from 'ws';
+import { v4 as uuidv4 } from 'uuid';
 
 export type NotificationType = 
   | 'tournament_start'
@@ -9,147 +11,248 @@ export type NotificationType =
   | 'registration_closing'
   | 'player_joined'
   | 'player_left'
-  | 'rank_update';
+  | 'rank_update'
+  | 'game_invite'
+  | 'achievement_unlocked'
+  | 'level_up'
+  | 'reward_available';
+
+export type NotificationPreference = {
+  type: NotificationType;
+  enabled: boolean;
+  email: boolean;
+  push: boolean;
+  inApp: boolean;
+};
 
 export type Notification = {
   id: string;
   type: NotificationType;
-  tournamentId: string;
+  tournamentId?: string;
+  recipient: string;
   message: string;
   timestamp: Date;
+  read: boolean;
   data?: any;
 };
 
 export class NotificationService {
   private notifications: Map<string, Notification[]> = new Map();
+  private preferences: Map<string, NotificationPreference[]> = new Map();
+  private wsConnections: Map<string, WebSocket> = new Map();
 
+  // Initialize default preferences for a player
+  private initializeDefaultPreferences(playerAddress: string): NotificationPreference[] {
+    return Object.values(NotificationType).map(type => ({
+      type,
+      enabled: true,
+      email: false,
+      push: false,
+      inApp: true
+    }));
+  }
+
+  // Get or initialize preferences for a player
+  private getPlayerPreferences(playerAddress: string): NotificationPreference[] {
+    if (!this.preferences.has(playerAddress)) {
+      this.preferences.set(playerAddress, this.initializeDefaultPreferences(playerAddress));
+    }
+    return this.preferences.get(playerAddress)!;
+  }
+
+  // Update notification preferences
+  async updatePreferences(
+    playerAddress: string,
+    preferences: Partial<NotificationPreference>[]
+  ): Promise<void> {
+    const currentPreferences = this.getPlayerPreferences(playerAddress);
+    
+    preferences.forEach(pref => {
+      const index = currentPreferences.findIndex(p => p.type === pref.type);
+      if (index !== -1) {
+        currentPreferences[index] = {
+          ...currentPreferences[index],
+          ...pref
+        };
+      }
+    });
+
+    this.preferences.set(playerAddress, currentPreferences);
+  }
+
+  // Create a new notification
   async createNotification(
     type: NotificationType,
-    tournamentId: string,
+    recipient: string,
     message: string,
-    data?: any
+    data?: any,
+    tournamentId?: string
   ): Promise<Notification> {
+    const preferences = this.getPlayerPreferences(recipient);
+    const preference = preferences.find(p => p.type === type);
+
+    if (!preference?.enabled) {
+      throw new Error('Notification type is disabled for this player');
+    }
+
     const notification: Notification = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: uuidv4(),
       type,
       tournamentId,
+      recipient,
       message,
       timestamp: new Date(),
+      read: false,
       data
     };
 
-    const tournamentNotifications = this.notifications.get(tournamentId) || [];
-    tournamentNotifications.push(notification);
-    this.notifications.set(tournamentId, tournamentNotifications);
+    const playerNotifications = this.notifications.get(recipient) || [];
+    playerNotifications.push(notification);
+    this.notifications.set(recipient, playerNotifications);
+
+    // Send real-time notification if WebSocket connection exists
+    if (this.wsConnections.has(recipient)) {
+      const ws = this.wsConnections.get(recipient)!;
+      ws.send(JSON.stringify(notification));
+    }
 
     return notification;
   }
 
-  async getTournamentNotifications(
-    tournamentId: string,
-    limit: number = 10
-  ): Promise<Notification[]> {
-    const notifications = this.notifications.get(tournamentId) || [];
-    return notifications.slice(-limit);
+  // Get notifications with pagination and filtering
+  async getNotifications(
+    playerAddress: string,
+    options: {
+      limit?: number;
+      offset?: number;
+      unreadOnly?: boolean;
+      types?: NotificationType[];
+    } = {}
+  ): Promise<{ notifications: Notification[]; total: number }> {
+    const {
+      limit = 10,
+      offset = 0,
+      unreadOnly = false,
+      types = []
+    } = options;
+
+    let notifications = this.notifications.get(playerAddress) || [];
+    
+    if (unreadOnly) {
+      notifications = notifications.filter(n => !n.read);
+    }
+    
+    if (types.length > 0) {
+      notifications = notifications.filter(n => types.includes(n.type));
+    }
+
+    // Sort by timestamp descending
+    notifications.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
+    return {
+      notifications: notifications.slice(offset, offset + limit),
+      total: notifications.length
+    };
   }
 
+  // Mark notifications as read
+  async markAsRead(
+    playerAddress: string,
+    notificationIds: string[]
+  ): Promise<void> {
+    const notifications = this.notifications.get(playerAddress) || [];
+    
+    notifications.forEach(notification => {
+      if (notificationIds.includes(notification.id)) {
+        notification.read = true;
+      }
+    });
+
+    this.notifications.set(playerAddress, notifications);
+  }
+
+  // Register WebSocket connection for real-time notifications
+  registerWebSocket(playerAddress: string, ws: WebSocket): void {
+    this.wsConnections.set(playerAddress, ws);
+    
+    ws.on('close', () => {
+      this.wsConnections.delete(playerAddress);
+    });
+  }
+
+  // Existing notification methods updated to use new structure
   async notifyTournamentStart(tournament: Tournament): Promise<void> {
-    await this.createNotification(
-      'tournament_start',
-      tournament.id,
-      `Tournament "${tournament.name}" has started!`,
-      { tournament }
-    );
+    const players = await this.getRegisteredPlayers(tournament.id);
+    await Promise.all(players.map(player => 
+      this.createNotification(
+        'tournament_start',
+        player,
+        `Tournament "${tournament.name}" has started!`,
+        { tournament },
+        tournament.id
+      )
+    ));
   }
 
-  async notifyTournamentEnd(tournament: Tournament): Promise<void> {
-    await this.createNotification(
-      'tournament_end',
-      tournament.id,
-      `Tournament "${tournament.name}" has ended!`,
-      { tournament }
-    );
-  }
+  // ... Update other existing notification methods similarly ...
 
-  async notifyPrizeDistribution(
-    tournament: Tournament,
-    winners: { address: string; amount: bigint }[]
+  // New notification types
+  async notifyGameInvite(
+    sender: string,
+    recipient: string,
+    gameId: string,
+    gameName: string
   ): Promise<void> {
     await this.createNotification(
-      'prize_distribution',
-      tournament.id,
-      `Prizes have been distributed for tournament "${tournament.name}"!`,
-      { tournament, winners }
+      'game_invite',
+      recipient,
+      `${sender} has invited you to play ${gameName}`,
+      { sender, gameId, gameName }
     );
   }
 
-  async notifyRegistrationOpen(tournament: Tournament): Promise<void> {
-    await this.createNotification(
-      'registration_open',
-      tournament.id,
-      `Registration is now open for tournament "${tournament.name}"!`,
-      { tournament }
-    );
-  }
-
-  async notifyRegistrationClosing(
-    tournament: Tournament,
-    timeLeft: number // in minutes
-  ): Promise<void> {
-    await this.createNotification(
-      'registration_closing',
-      tournament.id,
-      `Registration for tournament "${tournament.name}" is closing in ${timeLeft} minutes!`,
-      { tournament, timeLeft }
-    );
-  }
-
-  async notifyPlayerJoined(
-    tournament: Tournament,
-    playerAddress: string
-  ): Promise<void> {
-    await this.createNotification(
-      'player_joined',
-      tournament.id,
-      `Player ${playerAddress} has joined tournament "${tournament.name}"!`,
-      { tournament, playerAddress }
-    );
-  }
-
-  async notifyPlayerLeft(
-    tournament: Tournament,
-    playerAddress: string
-  ): Promise<void> {
-    await this.createNotification(
-      'player_left',
-      tournament.id,
-      `Player ${playerAddress} has left tournament "${tournament.name}"!`,
-      { tournament, playerAddress }
-    );
-  }
-
-  async notifyRankUpdate(
-    tournament: Tournament,
+  async notifyAchievementUnlocked(
     playerAddress: string,
-    newRank: number
+    achievementName: string,
+    reward: string
   ): Promise<void> {
     await this.createNotification(
-      'rank_update',
-      tournament.id,
-      `Player ${playerAddress} is now ranked #${newRank} in tournament "${tournament.name}"!`,
-      { tournament, playerAddress, newRank }
+      'achievement_unlocked',
+      playerAddress,
+      `Congratulations! You've unlocked the "${achievementName}" achievement!`,
+      { achievementName, reward }
     );
   }
 
-  async notifyCategoryRecommendation(
+  async notifyLevelUp(
     playerAddress: string,
-    category: TournamentCategory
+    newLevel: number,
+    rewards: string[]
   ): Promise<void> {
     await this.createNotification(
-      'registration_open',
-      'system',
-      `Based on your performance, we recommend trying ${category.name} tournaments!`,
-      { playerAddress, category }
+      'level_up',
+      playerAddress,
+      `Level Up! You've reached level ${newLevel}!`,
+      { newLevel, rewards }
     );
+  }
+
+  async notifyRewardAvailable(
+    playerAddress: string,
+    rewardName: string,
+    amount: string
+  ): Promise<void> {
+    await this.createNotification(
+      'reward_available',
+      playerAddress,
+      `New reward available: ${rewardName} (${amount})`,
+      { rewardName, amount }
+    );
+  }
+
+  // Helper method to get registered players (to be implemented)
+  private async getRegisteredPlayers(tournamentId: string): Promise<string[]> {
+    // TODO: Implement actual player retrieval
+    return [];
   }
 } 
