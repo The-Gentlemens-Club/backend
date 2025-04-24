@@ -1,24 +1,53 @@
 import { ethers } from 'ethers';
-import { gameABI } from '../abis/game';
-import { tokenABI } from '../abis/token';
-import { GameState, GameHistory, PlayerStats, Tournament } from '../types/game';
+import { GameState, GameHistory, PlayerStats } from '../types/game';
+import { Tournament, TournamentStatus } from '../types/tournament';
+import { UserService } from './userService';
+import { NotificationService } from './notificationService';
 
 export class ContractService {
-  private provider: ethers.JsonRpcProvider;
-  private signer: ethers.Wallet;
+  private provider: ethers.Provider;
+  private tournamentContract: ethers.Contract;
   private gameContract: ethers.Contract;
-  private tokenContract: ethers.Contract;
 
-  constructor() {
-    const providerUrl = process.env.PROVIDER_URL || '';
-    const privateKey = process.env.PRIVATE_KEY || '';
-    const gameAddress = process.env.GAME_CONTRACT_ADDRESS || '';
-    const tokenAddress = process.env.TOKEN_CONTRACT_ADDRESS || '';
+  constructor(
+    private rpcUrl: string,
+    private tournamentContractAddress: string,
+    private gameContractAddress: string,
+    private userService: UserService,
+    private notificationService: NotificationService,
+    private jwtSecret: string
+  ) {
+    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    this.tournamentContract = new ethers.Contract(
+      tournamentContractAddress,
+      [], // Add ABI here
+      this.provider
+    );
+    this.gameContract = new ethers.Contract(
+      gameContractAddress,
+      [], // Add ABI here
+      this.provider
+    );
+  }
 
-    this.provider = new ethers.JsonRpcProvider(providerUrl);
-    this.signer = new ethers.Wallet(privateKey, this.provider);
-    this.gameContract = new ethers.Contract(gameAddress, gameABI, this.signer);
-    this.tokenContract = new ethers.Contract(tokenAddress, tokenABI, this.signer);
+  public async getPlayerStats(address: string): Promise<PlayerStats> {
+    return {
+      address,
+      totalGames: 0,
+      wins: 0,
+      losses: 0,
+      draws: 0,
+      totalBetAmount: 0n,
+      totalWinAmount: 0n,
+      winRate: 0,
+      highestWin: 0n,
+      currentStreak: 0,
+      bestStreak: 0,
+      lastGamePlayed: new Date(),
+      level: 1,
+      experience: 0,
+      rank: 'Bronze'
+    };
   }
 
   async getGameState(address: string): Promise<GameState> {
@@ -112,29 +141,6 @@ export class ContractService {
     }
   }
 
-  async getPlayerStats(address: string): Promise<PlayerStats> {
-    try {
-      const stats = await this.gameContract.getPlayerStats(address);
-      return {
-        address,
-        totalGames: Number(stats[0]),
-        wins: Number(stats[1]),
-        losses: Number(stats[2]),
-        draws: Number(stats[3]),
-        totalBetAmount: stats[4],
-        totalWinAmount: stats[5],
-        winRate: Number(stats[1]) / Number(stats[0]) || 0,
-        highestWin: stats[6],
-        currentStreak: Number(stats[7]),
-        bestStreak: Number(stats[8]),
-        lastGamePlayed: new Date()  // This would need to be fetched separately
-      };
-    } catch (error) {
-      console.error('Error getting player stats:', error);
-      throw error;
-    }
-  }
-
   async getPlayerHistory(
     address: string,
     offset: number = 0,
@@ -158,7 +164,7 @@ export class ContractService {
 
   async getBalance(address: string) {
     try {
-      return await this.tokenContract.balanceOf(address);
+      return await this.gameContract.balanceOf(address);
     } catch (error) {
       console.error('Error getting balance:', error);
       throw error;
@@ -167,7 +173,7 @@ export class ContractService {
 
   async approve(spender: string, amount: bigint) {
     try {
-      const tx = await this.tokenContract.approve(spender, amount);
+      const tx = await this.gameContract.approve(spender, amount);
       await tx.wait();
       return tx.hash;
     } catch (error) {
