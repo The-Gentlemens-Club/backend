@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { AchievementService } from '../services/achievementService';
+import { NotificationService } from '../services/notificationService';
 import { UserService } from '../services/userService';
 import { ContractService } from '../services/contractService';
-import { NotificationService } from '../services/notificationService';
+import { authenticate } from '../middleware/auth';
 import { config } from '../config';
 
 const router = Router();
@@ -17,18 +18,21 @@ const contractService = new ContractService(
   notificationService,
   config.jwtSecret
 );
+const achievementService = new AchievementService(userService, contractService, notificationService);
 
-const achievementService = new AchievementService(
-  userService,
-  contractService,
-  notificationService
-);
+// Get all available achievements
+router.get('/', async (req, res) => {
+  try {
+    res.json(achievementService.achievements);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get achievements' });
+  }
+});
 
 // Get player achievements
-router.get('/player/:address', async (req, res) => {
+router.get('/player/:address', authenticate(userService), async (req, res) => {
   try {
-    const { address } = req.params;
-    const achievements = await achievementService.getPlayerAchievements(address);
+    const achievements = await achievementService.getPlayerAchievements(req.params.address);
     res.json(achievements);
   } catch (error) {
     res.status(500).json({ error: 'Failed to get player achievements' });
@@ -36,32 +40,12 @@ router.get('/player/:address', async (req, res) => {
 });
 
 // Check for new achievements
-router.post('/check/:address', async (req, res) => {
+router.post('/check/:address', authenticate(userService), async (req, res) => {
   try {
-    const { address } = req.params;
-    await achievementService.checkAchievements(address);
+    await achievementService.checkAchievements(req.params.address);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to check achievements' });
-  }
-});
-
-// Get achievement types
-router.get('/types', async (req, res) => {
-  try {
-    const types = [
-      'first_win',
-      'tournament_victory',
-      'streak_master',
-      'high_roller',
-      'loyal_player',
-      'quick_learner',
-      'risk_taker',
-      'strategist'
-    ];
-    res.json(types);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to get achievement types' });
   }
 });
 
