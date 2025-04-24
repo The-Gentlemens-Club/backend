@@ -95,7 +95,7 @@ export class UserService {
   }
 
   private getLevelRewards(level: number): string[] {
-    const rewards = [];
+    const rewards: string[] = [];
     
     // Basic rewards for each level
     rewards.push(`${level * 100} Bonus Points`);
