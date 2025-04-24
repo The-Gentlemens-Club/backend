@@ -26,6 +26,39 @@ export interface PlayerStats {
   currentStreak: number;
   bestStreak: number;
   lastGamePlayed: Date;
+  averageBet?: bigint;
+  achievementPoints?: number;
+  level?: number;
+  experience?: number;
+  rank?: string;
+}
+
+export interface GameConfig {
+  minBet: bigint;
+  maxBet: bigint;
+  maxPlayers: number;
+  roundDuration: number;
+  houseEdge: number;
+}
+
+export interface GameResult {
+  gameId: string;
+  playerAddress: string;
+  betAmount: bigint;
+  outcome: 'win' | 'lose' | 'draw';
+  payout: bigint;
+  timestamp: Date;
+  txHash: string;
+}
+
+export interface GameStats {
+  totalGames: number;
+  totalBets: bigint;
+  totalPayouts: bigint;
+  averageBet: bigint;
+  largestWin: bigint;
+  uniquePlayers: number;
+  houseProfit: bigint;
 }
 
 export interface Tournament {

@@ -37,7 +37,7 @@ export interface UserStats {
   draws: number;
   winRate: number;
   totalBetAmount: bigint;
-  totalWonAmount: bigint;
+  totalWinAmount: bigint;
   highestWin: bigint;
   currentStreak: number;
   bestStreak: number;
@@ -55,4 +55,36 @@ export interface UserSession {
     userAgent: string;
     ip: string;
   };
+}
+
+export enum NotificationType {
+  GAME_RESULT = 'game_result',
+  TOURNAMENT_JOINED = 'tournament_joined',
+  TOURNAMENT_STARTED = 'tournament_started',
+  TOURNAMENT_ENDED = 'tournament_ended',
+  TOURNAMENT_WON = 'tournament_won',
+  ACHIEVEMENT_UNLOCKED = 'achievement_unlocked',
+  LEVEL_UP = 'level_up',
+  REWARD_CLAIMED = 'reward_claimed',
+  SYSTEM = 'system'
+}
+
+export interface NotificationPreference {
+  type: NotificationType;
+  enabled: boolean;
+  email: boolean;
+  push: boolean;
+  inApp: boolean;
+}
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  recipientAddress: string;
+  title: string;
+  message: string;
+  data?: Record<string, any>;
+  read: boolean;
+  createdAt: Date;
+  expiresAt?: Date;
 } 
