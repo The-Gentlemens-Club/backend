@@ -9,6 +9,7 @@ import statsRoutes from './routes/stats';
 import notificationRoutes from './routes/notifications';
 import { errorHandler } from './middleware/errorHandler';
 import { initWebSocket } from './routes/notifications';
+import { achievementRouter } from './routes/achievements';
 
 // Load environment variables
 dotenv.config();
@@ -29,6 +30,7 @@ app.use('/api/token', tokenRoutes);
 app.use('/api/tournaments', tournamentRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/achievements', achievementRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
