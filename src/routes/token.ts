@@ -18,6 +18,16 @@ const contractService = new ContractService(
   config.jwtSecret
 );
 
+// Get player stats
+router.get('/stats/:address', async (req, res) => {
+  try {
+    const stats = await contractService.getPlayerStats(req.params.address);
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get player stats' });
+  }
+});
+
 // Get token balance
 router.get('/balance/:address', async (req, res) => {
   try {
