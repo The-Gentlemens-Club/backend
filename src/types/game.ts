@@ -29,10 +29,12 @@ export interface PlayerStats {
   bestStreak: number;
   lastGamePlayed: Date;
   averageBet?: bigint;
-  achievementPoints?: number;
-  level?: number;
-  experience?: number;
-  rank?: string;
+  level: number;
+  experience: number;
+  rank: string;
+  tournamentsPlayed?: number;
+  tournamentsWon?: number;
+  achievements?: Achievement[];
 }
 
 export interface GameConfig {
@@ -61,4 +63,14 @@ export interface GameStats {
   largestWin: bigint;
   uniquePlayers: number;
   houseProfit: bigint;
+}
+
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  unlockedAt: Date;
+  progress: number;
+  maxProgress: number;
+  isUnlocked: boolean;
 } 

@@ -10,6 +10,8 @@ import notificationRoutes from './routes/notifications';
 import { errorHandler } from './middleware/errorHandler';
 import { initWebSocket } from './routes/notifications';
 import { achievementRouter } from './routes/achievements';
+import { config } from './config';
+import userRouter from './routes/users';
 
 // Load environment variables
 dotenv.config();
@@ -18,7 +20,9 @@ const app = express();
 const server = createServer(app);
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: config.corsOrigin
+}));
 app.use(express.json());
 
 // Initialize WebSocket server
@@ -31,6 +35,7 @@ app.use('/api/tournaments', tournamentRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/achievements', achievementRouter);
+app.use('/api/users', userRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
