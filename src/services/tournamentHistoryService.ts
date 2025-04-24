@@ -38,7 +38,7 @@ export class TournamentHistoryService {
             wins: stats.wins,
             losses: stats.losses,
             totalBet: stats.totalBetAmount,
-            totalWon: stats.totalWonAmount
+            totalWon: stats.totalWinAmount
           };
         })
       );
@@ -48,15 +48,15 @@ export class TournamentHistoryService {
         name: tournament.name,
         startTime: tournament.startTime,
         endTime: tournament.endTime,
-        entryFee: tournament.entryFee,
-        prizePool: tournament.prizePool || 0n,
+        entryFee: BigInt(tournament.entryFee),
+        prizePool: tournament.prizePool ? BigInt(tournament.prizePool) : 0n,
         players: players,
         winners: winners.map((winner) => winner.address),
         stats: {
           totalPlayers: BigInt(players.length),
           activePlayers: BigInt(players.length),
-          totalPrizePool: tournament.prizePool || 0n,
-          averageEntryFee: tournament.entryFee,
+          totalPrizePool: tournament.prizePool ? BigInt(tournament.prizePool) : 0n,
+          averageEntryFee: BigInt(tournament.entryFee),
           completedGames: BigInt(0),
           activeGames: BigInt(players.length)
         }
@@ -84,11 +84,11 @@ export class TournamentHistoryService {
       name: tournament.name,
       startTime: tournament.startTime,
       endTime: tournament.endTime,
-      entryFee: tournament.entryFee,
-      prizePool: tournament.prizePool,
+      entryFee: BigInt(tournament.entryFee),
+      prizePool: tournament.prizePool ? BigInt(tournament.prizePool) : 0n,
       players: tournament.players,
       winners: tournament.winners || [],
-      stats: tournament.stats || {
+      stats: {
         totalPlayers: 0n,
         activePlayers: 0n,
         totalPrizePool: 0n,
@@ -121,9 +121,13 @@ export class TournamentHistoryService {
   public async getPlayerStats(playerAddress: string): Promise<PlayerStats> {
     const history = await this.getPlayerHistory(playerAddress);
     const stats: PlayerStats = {
-      totalTournaments: BigInt(history.length),
-      tournamentsWon: BigInt(history.filter(t => t.winners.includes(playerAddress)).length),
-      totalPrize: history.reduce((sum, t) => {
+      address: playerAddress,
+      totalGames: history.length,
+      wins: history.filter(t => t.winners.includes(playerAddress)).length,
+      losses: 0,
+      draws: 0,
+      totalBetAmount: 0n,
+      totalWinAmount: history.reduce((sum, t) => {
         if (t.winners.includes(playerAddress)) {
           return sum + (t.prizePool / BigInt(t.winners.length));
         }
@@ -132,8 +136,12 @@ export class TournamentHistoryService {
       winRate: history.length > 0 
         ? Number(history.filter(t => t.winners.includes(playerAddress)).length) / history.length
         : 0,
+      highestWin: 0n,
+      currentStreak: 0,
+      bestStreak: 0,
+      lastGamePlayed: new Date(),
       level: 1,
-      experience: 0n,
+      experience: 0,
       rank: 'Novice'
     };
     return stats;
@@ -144,10 +152,10 @@ export class TournamentHistoryService {
     const stats: TournamentStats = {
       totalPlayers: BigInt(new Set(tournaments.flatMap(t => t.players)).size),
       activePlayers: BigInt(new Set(tournaments.filter(t => !t.endTime).flatMap(t => t.players)).size),
-      totalPrizePool: tournaments.reduce((sum, t) => sum + t.prizePool, 0n),
+      totalPrizePool: tournaments.reduce((sum, t) => sum + t.prizePool, 0n).toString(),
       averageEntryFee: tournaments.length > 0
-        ? tournaments.reduce((sum, t) => sum + t.entryFee, 0n) / BigInt(tournaments.length)
-        : 0n,
+        ? (tournaments.reduce((sum, t) => sum + t.entryFee, 0n) / BigInt(tournaments.length)).toString()
+        : '0',
       completedGames: BigInt(tournaments.filter(t => t.endTime).length),
       activeGames: BigInt(tournaments.filter(t => !t.endTime).length)
     };
@@ -209,7 +217,7 @@ export class TournamentHistoryService {
       history.winners.forEach(winner => {
         const stats = playerStats.get(winner) || { tournamentsWon: 0, totalPrize: BigInt(0) };
         stats.tournamentsWon++;
-        stats.totalPrize += BigInt(history.prizePool);
+        stats.totalPrize += history.prizePool;
         playerStats.set(winner, stats);
       });
     });
