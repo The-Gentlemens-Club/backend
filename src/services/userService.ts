@@ -13,17 +13,17 @@ export class UserService {
   }
 
   // Initialize a new user profile
-  private initializeUserProfile(address: string, username: string): UserProfile {
+  private initializeUserProfile(address: string): UserProfile {
     return {
       address,
-      username,
+      username: `Player_${address.slice(0, 6)}`,
       role: 'user',
       createdAt: new Date(),
       lastLogin: new Date(),
       settings: {
         notifications: {
-          email: false,
-          push: false,
+          email: true,
+          push: true,
           inApp: true
         },
         privacy: {
@@ -31,7 +31,7 @@ export class UserService {
           showStats: true,
           showActivity: true
         },
-        theme: 'dark',
+        theme: 'system',
         language: 'en'
       },
       stats: {
@@ -43,7 +43,7 @@ export class UserService {
         draws: 0,
         winRate: 0,
         totalBetAmount: BigInt(0),
-        totalWonAmount: BigInt(0),
+        totalWinAmount: BigInt(0),
         highestWin: BigInt(0),
         currentStreak: 0,
         bestStreak: 0,
@@ -63,7 +63,7 @@ export class UserService {
       throw new Error('User already exists');
     }
 
-    const profile = this.initializeUserProfile(address, username);
+    const profile = this.initializeUserProfile(address);
     this.users.set(address, profile);
 
     // Send welcome notification

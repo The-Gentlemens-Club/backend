@@ -1,5 +1,6 @@
 import { UserService } from './userService';
 import { ContractService } from './contractService';
+import { NotificationService } from './notificationService';
 
 export type AchievementType = 
   | 'first_win'
@@ -33,7 +34,8 @@ export class AchievementService {
 
   constructor(
     private userService: UserService,
-    private contractService: ContractService
+    private contractService: ContractService,
+    private notificationService: NotificationService
   ) {}
 
   async checkAchievements(address: string): Promise<Achievement[]> {
@@ -197,5 +199,40 @@ export class AchievementService {
         reward: { points: 400, badge: 'loyal_player' }
       }
     ];
+  }
+
+  private async checkWinStreakAchievements(address: string, stats: PlayerStats): Promise<void> {
+    const achievements = this.achievements.filter(a => a.type === 'win_streak');
+    
+    for (const achievement of achievements) {
+      if (stats.currentStreak >= achievement.criteria.streak && !stats.achievements.includes(achievement.id)) {
+        await this.awardAchievement(address, achievement);
+      }
+    }
+  }
+
+  private async checkHighRollerAchievements(address: string, stats: PlayerStats): Promise<void> {
+    const achievements = this.achievements.filter(a => a.type === 'high_roller');
+    
+    for (const achievement of achievements) {
+      if (stats.highestWin >= achievement.criteria.amount && !stats.achievements.includes(achievement.id)) {
+        await this.awardAchievement(address, achievement);
+      }
+    }
+  }
+
+  private async awardAchievement(address: string, achievement: Achievement): Promise<void> {
+    const profile = await this.userService.getUserProfile(address);
+    if (!profile) return;
+
+    profile.stats.achievements.push(achievement.id);
+    const points = this.calculateAchievementPoints(achievement);
+    
+    await this.userService.updateStats(address, {
+      achievements: profile.stats.achievements,
+      experience: profile.stats.experience + points
+    });
+
+    await this.notificationService.notifyAchievementUnlocked(address, achievement);
   }
 } 

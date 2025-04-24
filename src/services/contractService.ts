@@ -1,9 +1,8 @@
 import { ethers } from 'ethers';
-import { Contract } from 'ethers';
+import { Tournament } from '../types/tournament';
 import { TournamentService } from './tournamentService';
 import { UserService } from './userService';
 import { NotificationService } from './notificationService';
-import { Tournament } from '../types/tournament';
 
 // Contract ABIs
 const TOURNAMENT_ABI = [
@@ -27,22 +26,31 @@ const GAME_ABI = [
   'event GamePlayed(address indexed player, uint256 indexed gameId, uint256 betAmount, uint8 outcome)'
 ];
 
-interface TournamentContract extends Contract {
-  createTournament: (name: string, entryFee: bigint, startTime: number) => Promise<ethers.ContractTransaction>;
-  joinTournament: (tournamentId: bigint, options: { value: bigint }) => Promise<ethers.ContractTransaction>;
-  getTournament: (tournamentId: bigint) => Promise<[string, bigint, bigint, bigint, bigint, number]>;
-  getTournamentPlayers: (tournamentId: bigint) => Promise<string[]>;
-  getTournamentWinners: (tournamentId: bigint) => Promise<[string[], bigint[]]>;
-  distributePrizes: (tournamentId: bigint) => Promise<ethers.ContractTransaction>;
-  getTournamentStatus: (tournamentId: bigint) => Promise<number>;
+type ContractTransaction = ethers.ContractTransactionResponse;
+
+interface TournamentContractInterface {
+  createTournament(name: string, entryFee: bigint, startTime: number): Promise<ContractTransaction>;
+  joinTournament(tournamentId: bigint, options: { value: bigint }): Promise<ContractTransaction>;
+  getTournament(tournamentId: bigint): Promise<[string, bigint, bigint, bigint, bigint, number]>;
+  getTournamentPlayers(tournamentId: bigint): Promise<string[]>;
+  getTournamentWinners(tournamentId: bigint): Promise<[string[], bigint[]]>;
+  distributePrizes(tournamentId: bigint): Promise<ContractTransaction>;
+  getTournamentStatus(tournamentId: bigint): Promise<number>;
+  on(event: string, listener: (...args: any[]) => void): ethers.BaseContract;
+  connect(signer: ethers.Signer): ethers.BaseContract & TournamentContractInterface;
 }
 
-interface GameContract extends Contract {
-  playGame: (betAmount: bigint) => Promise<ethers.ContractTransaction>;
-  getGameHistory: (player: string) => Promise<bigint[]>;
-  getLastGamePlayed: (player: string) => Promise<bigint>;
-  getGameOutcome: (gameId: bigint) => Promise<number>;
+interface GameContractInterface {
+  playGame(betAmount: bigint): Promise<ContractTransaction>;
+  getGameHistory(player: string): Promise<bigint[]>;
+  getLastGamePlayed(player: string): Promise<bigint>;
+  getGameOutcome(gameId: bigint): Promise<number>;
+  on(event: string, listener: (...args: any[]) => void): ethers.BaseContract;
+  connect(signer: ethers.Signer): ethers.BaseContract & GameContractInterface;
 }
+
+type TournamentContract = ethers.BaseContract & TournamentContractInterface;
+type GameContract = ethers.BaseContract & GameContractInterface;
 
 export class ContractService {
   private provider: ethers.JsonRpcProvider;
@@ -61,8 +69,16 @@ export class ContractService {
     notificationService: NotificationService
   ) {
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
-    this.tournamentContract = new Contract(tournamentContractAddress, TOURNAMENT_ABI, this.provider) as TournamentContract;
-    this.gameContract = new Contract(gameContractAddress, GAME_ABI, this.provider) as GameContract;
+    this.tournamentContract = new ethers.Contract(
+      tournamentContractAddress,
+      TOURNAMENT_ABI,
+      this.provider
+    ) as unknown as TournamentContract;
+    this.gameContract = new ethers.Contract(
+      gameContractAddress,
+      GAME_ABI,
+      this.provider
+    ) as unknown as GameContract;
     this.tournamentService = tournamentService;
     this.userService = userService;
     this.notificationService = notificationService;
@@ -73,7 +89,7 @@ export class ContractService {
 
   private setupEventListeners() {
     // Tournament events
-    this.tournamentContract.on('TournamentCreated', async (tournamentId, name, entryFee, startTime) => {
+    this.tournamentContract.on('TournamentCreated', async (tournamentId: bigint, name: string, entryFee: bigint, startTime: bigint) => {
       const tournament: Tournament = {
         id: tournamentId.toString(),
         name,
@@ -86,12 +102,12 @@ export class ContractService {
       await this.tournamentService.createTournament(tournament);
     });
 
-    this.tournamentContract.on('PlayerJoined', async (tournamentId, player) => {
+    this.tournamentContract.on('PlayerJoined', async (tournamentId: bigint, player: string) => {
       await this.tournamentService.addPlayer(tournamentId.toString(), player);
       await this.notificationService.notifyTournamentJoined(player, tournamentId.toString());
     });
 
-    this.tournamentContract.on('TournamentCompleted', async (tournamentId, winners, prizes) => {
+    this.tournamentContract.on('TournamentCompleted', async (tournamentId: bigint, winners: string[], prizes: bigint[]) => {
       await this.tournamentService.updateTournamentStatus(tournamentId.toString(), 'completed');
       for (let i = 0; i < winners.length; i++) {
         await this.notificationService.notifyTournamentWon(winners[i], tournamentId.toString(), prizes[i].toString());
@@ -99,12 +115,12 @@ export class ContractService {
     });
 
     // Game events
-    this.gameContract.on('GamePlayed', async (player, gameId, betAmount, outcome) => {
+    this.gameContract.on('GamePlayed', async (player: string, gameId: bigint, betAmount: bigint, outcome: number) => {
       const outcomeStr = this.getGameOutcomeString(outcome);
       await this.userService.updateStats(player, {
         totalGames: 1,
         [outcomeStr === 'win' ? 'wins' : outcomeStr === 'lose' ? 'losses' : 'draws']: 1,
-        totalBetAmount: BigInt(betAmount.toString())
+        totalBetAmount: betAmount
       });
       await this.notificationService.notifyGameResult(player, gameId.toString(), outcomeStr);
     });
@@ -118,10 +134,11 @@ export class ContractService {
     startTime: Date
   ): Promise<string> {
     const signer = new ethers.Wallet(privateKey, this.provider);
-    const contract = this.tournamentContract.connect(signer);
+    const contract = this.tournamentContract.connect(signer) as TournamentContract;
     const tx = await contract.createTournament(name, entryFee, Math.floor(startTime.getTime() / 1000));
-    await tx.wait();
-    return tx.hash;
+    const receipt = await tx.wait();
+    if (!receipt) throw new Error('Transaction failed');
+    return receipt.hash;
   }
 
   async joinTournament(
@@ -130,10 +147,11 @@ export class ContractService {
     entryFee: bigint
   ): Promise<string> {
     const signer = new ethers.Wallet(privateKey, this.provider);
-    const contract = this.tournamentContract.connect(signer);
+    const contract = this.tournamentContract.connect(signer) as TournamentContract;
     const tx = await contract.joinTournament(tournamentId, { value: entryFee });
-    await tx.wait();
-    return tx.hash;
+    const receipt = await tx.wait();
+    if (!receipt) throw new Error('Transaction failed');
+    return receipt.hash;
   }
 
   async getTournament(tournamentId: bigint) {
@@ -162,19 +180,21 @@ export class ContractService {
 
   async distributePrizes(privateKey: string, tournamentId: bigint): Promise<string> {
     const signer = new ethers.Wallet(privateKey, this.provider);
-    const contract = this.tournamentContract.connect(signer);
+    const contract = this.tournamentContract.connect(signer) as TournamentContract;
     const tx = await contract.distributePrizes(tournamentId);
-    await tx.wait();
-    return tx.hash;
+    const receipt = await tx.wait();
+    if (!receipt) throw new Error('Transaction failed');
+    return receipt.hash;
   }
 
   // Game methods
   async playGame(privateKey: string, betAmount: bigint): Promise<string> {
     const signer = new ethers.Wallet(privateKey, this.provider);
-    const contract = this.gameContract.connect(signer);
+    const contract = this.gameContract.connect(signer) as GameContract;
     const tx = await contract.playGame(betAmount);
-    await tx.wait();
-    return tx.hash;
+    const receipt = await tx.wait();
+    if (!receipt) throw new Error('Transaction failed');
+    return receipt.hash;
   }
 
   async getGameHistory(address: string): Promise<bigint[]> {

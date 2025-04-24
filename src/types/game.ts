@@ -1,3 +1,5 @@
+import { Tournament } from './tournament';
+
 export interface GameState {
   isActive: boolean;
   currentBet: bigint;
@@ -59,21 +61,4 @@ export interface GameStats {
   largestWin: bigint;
   uniquePlayers: number;
   houseProfit: bigint;
-}
-
-export interface Tournament {
-  id: string;
-  name: string;
-  startTime: Date;
-  endTime: Date;
-  entryFee: bigint;
-  prizePool: bigint;
-  maxPlayers: number;
-  registeredPlayers: string[];
-  status: 'upcoming' | 'active' | 'completed';
-  winners: {
-    address: string;
-    prize: bigint;
-    rank: number;
-  }[];
 } 
