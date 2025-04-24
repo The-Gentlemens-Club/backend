@@ -31,69 +31,8 @@ export class PlayerStatsService {
   }
 
   private async initializePlayerStats(address: string): Promise<void> {
-    const games = await this.contractService.getGameHistory(address);
-    const stats = await this.calculateStats(address, games);
+    const stats = await this.contractService.getPlayerStats(address);
     this.stats.set(address, stats);
-  }
-
-  private async calculateStats(address: string, games: bigint[]): Promise<PlayerStats> {
-    let totalGames = 0;
-    let wins = 0;
-    let losses = 0;
-    let draws = 0;
-    let totalBetAmount = BigInt(0);
-    let totalWinAmount = BigInt(0);
-    let highestWin = BigInt(0);
-    let currentStreak = 0;
-    let bestStreak = 0;
-    let lastGamePlayed = new Date(0);
-
-    for (const gameId of games) {
-      const outcome = await this.contractService.getGameOutcome(gameId);
-      totalGames++;
-
-      if (outcome === 'win') {
-        wins++;
-        currentStreak = Math.max(0, currentStreak) + 1;
-        bestStreak = Math.max(bestStreak, currentStreak);
-      } else if (outcome === 'lose') {
-        losses++;
-        currentStreak = Math.min(0, currentStreak) - 1;
-      } else {
-        draws++;
-        currentStreak = 0;
-      }
-
-      // TODO: Get bet amount and win amount from contract
-      const betAmount = BigInt(0);
-      const winAmount = BigInt(0);
-      totalBetAmount += betAmount;
-      totalWinAmount += winAmount;
-      highestWin = winAmount > highestWin ? winAmount : highestWin;
-
-      // Update last game played
-      const timestamp = await this.contractService.getLastGamePlayed(address);
-      lastGamePlayed = new Date(Math.max(lastGamePlayed.getTime(), timestamp.getTime()));
-    }
-
-    return {
-      address,
-      totalGames,
-      wins,
-      losses,
-      draws,
-      totalBetAmount,
-      totalWinAmount,
-      winRate: totalGames > 0 ? wins / totalGames : 0,
-      highestWin,
-      currentStreak,
-      bestStreak,
-      lastGamePlayed,
-      averageBet: totalGames > 0 ? totalBetAmount / BigInt(totalGames) : BigInt(0),
-      level: 1,
-      experience: 0,
-      rank: 'Bronze'
-    };
   }
 
   public async updateStats(address: string, update: Partial<PlayerStats>): Promise<void> {
@@ -158,9 +97,9 @@ export class PlayerStatsService {
       name: 'High Roller',
       description: 'Place a bet of 1 ETH or more',
       unlockedAt: new Date(),
-      progress: Number(stats.averageBet || 0n),
+      progress: Number(stats.highestWin || 0n),
       maxProgress: Number(BigInt(1e18)), // 1 ETH
-      isUnlocked: (stats.averageBet || 0n) >= BigInt(1e18)
+      isUnlocked: (stats.highestWin || 0n) >= BigInt(1e18)
     });
 
     return achievements;

@@ -68,7 +68,15 @@ export class TournamentService {
   }
 
   public async getTournament(tournamentId: string): Promise<Tournament | undefined> {
-    return this.tournaments.get(tournamentId);
+    const tournament = this.tournaments.get(tournamentId);
+    if (!tournament) {
+      const contractTournament = await this.contractService.getTournament(BigInt(tournamentId));
+      if (contractTournament) {
+        this.tournaments.set(tournamentId, contractTournament);
+        return contractTournament;
+      }
+    }
+    return tournament;
   }
 
   public async getAllTournaments(): Promise<Tournament[]> {
@@ -81,6 +89,18 @@ export class TournamentService {
       tournament.status = status;
       this.tournaments.set(tournamentId, tournament);
     }
+  }
+
+  public async getRegisteredPlayers(tournamentId: string): Promise<string[]> {
+    return await this.contractService.getRegisteredPlayers(BigInt(tournamentId));
+  }
+
+  public async getTournamentWinners(tournamentId: string): Promise<string[]> {
+    return await this.contractService.getTournamentWinners(BigInt(tournamentId));
+  }
+
+  public async getTournamentLeaderboard(tournamentId: string): Promise<{ address: string; score: number }[]> {
+    return await this.contractService.getTournamentLeaderboard(BigInt(tournamentId));
   }
 
   public async scheduleTournament(tournamentId: string): Promise<void> {
