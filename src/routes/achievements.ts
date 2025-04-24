@@ -11,15 +11,15 @@ const router = Router();
 
 const notificationService = new NotificationService();
 const userService = new UserService(notificationService);
-const tournamentService = new TournamentService();
 const contractService = new ContractService(
   config.rpcUrl,
   config.tournamentContractAddress,
   config.gameContractAddress,
-  tournamentService,
   userService,
-  notificationService
+  notificationService,
+  config.jwtSecret
 );
+const tournamentService = new TournamentService(contractService, userService, notificationService);
 const achievementService = new AchievementService(userService, contractService, notificationService);
 
 // Get all available achievements

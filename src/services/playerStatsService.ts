@@ -108,21 +108,16 @@ export class PlayerStatsService {
     totalWon: bigint;
     tournamentsWon: number;
   }[]> {
-    const allPlayers = await this.contractService.getAllPlayers();
-    const playerStats = await Promise.all(
-      allPlayers.map(async (player) => {
-        const stats = await this.getPlayerStats(player);
-        return {
-          address: player,
-          rank: stats.rank,
-          winRate: stats.winRate,
-          totalWon: stats.totalWinAmount,
-          tournamentsWon: stats.tournamentsWon || 0
-        };
-      })
-    );
+    const stats = Array.from(this.stats.values());
+    const leaderboard = stats.map(stat => ({
+      address: stat.address,
+      rank: this.calculateRank(stat),
+      winRate: stat.winRate,
+      totalWon: stat.totalWinAmount,
+      tournamentsWon: stat.tournamentsWon || 0
+    }));
 
-    return playerStats
+    return leaderboard
       .sort((a, b) => {
         if (a.rank !== b.rank) {
           return a.rank - b.rank;
@@ -133,6 +128,13 @@ export class PlayerStatsService {
         return Number(b.totalWon - a.totalWon);
       })
       .slice(0, limit);
+  }
+
+  private calculateRank(stats: PlayerStats): number {
+    // Simple rank calculation based on win rate and total games
+    const baseRank = Math.floor(stats.winRate * 100);
+    const gamesBonus = Math.min(stats.totalGames / 10, 10);
+    return baseRank + gamesBonus;
   }
 
   async getPlayerAchievements(address: string): Promise<Achievement[]> {
