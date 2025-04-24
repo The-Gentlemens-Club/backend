@@ -137,4 +137,40 @@ export class AchievementService {
 
     return leaderboard.sort((a, b) => b.points - a.points);
   }
+
+  public async getAchievementProgress(address: string): Promise<{ [key: string]: number }> {
+    const stats = await this.userService.getUserStats(address);
+    if (!stats) return {};
+
+    const progress: { [key: string]: number } = {};
+    const unlockedAchievements = await this.getPlayerAchievements(address);
+
+    // Calculate progress for each achievement
+    for (const achievement of this.achievements) {
+      if (unlockedAchievements.some(a => a.id === achievement.id)) {
+        progress[achievement.id] = 1; // Achievement already unlocked
+        continue;
+      }
+
+      switch (achievement.type) {
+        case 'first_win':
+          progress[achievement.id] = stats.wins > 0 ? 1 : 0;
+          break;
+        case 'win_streak':
+          progress[achievement.id] = achievement.criteria.streak 
+            ? Math.min(stats.bestStreak / achievement.criteria.streak, 1)
+            : 0;
+          break;
+        case 'high_roller':
+          progress[achievement.id] = achievement.criteria.amount
+            ? Number(stats.highestWin * BigInt(100) / achievement.criteria.amount) / 100
+            : 0;
+          break;
+        default:
+          progress[achievement.id] = 0;
+      }
+    }
+
+    return progress;
+  }
 } 
