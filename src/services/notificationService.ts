@@ -1,126 +1,36 @@
-import { Tournament } from '../types/tournament';
-import { TournamentCategory } from './tournamentRulesService';
+import { Notification, NotificationType, NotificationPreference } from '../types/user';
 import { WebSocket } from 'ws';
-import { v4 as uuidv4 } from 'uuid';
-
-export type NotificationType = 
-  | 'tournament_start'
-  | 'tournament_end'
-  | 'prize_distribution'
-  | 'registration_open'
-  | 'registration_closing'
-  | 'player_joined'
-  | 'player_left'
-  | 'rank_update'
-  | 'game_invite'
-  | 'achievement_unlocked'
-  | 'level_up'
-  | 'reward_available';
-
-export type NotificationPreference = {
-  type: NotificationType;
-  enabled: boolean;
-  email: boolean;
-  push: boolean;
-  inApp: boolean;
-};
-
-export type Notification = {
-  id: string;
-  type: NotificationType;
-  tournamentId?: string;
-  recipient: string;
-  message: string;
-  timestamp: Date;
-  read: boolean;
-  data?: any;
-};
 
 export class NotificationService {
   private notifications: Map<string, Notification[]> = new Map();
   private preferences: Map<string, NotificationPreference[]> = new Map();
-  private connections: Map<string, WebSocket> = new Map();
+  private webSockets: Map<string, WebSocket> = new Map();
 
-  // Initialize default preferences for a player
-  private initializeDefaultPreferences(playerAddress: string): NotificationPreference[] {
-    return Object.values(NotificationType).map(type => ({
-      type,
-      enabled: true,
-      email: false,
-      push: false,
-      inApp: true
-    }));
+  constructor() {
+    this.initializeDefaultPreferences();
   }
 
-  // Get or initialize preferences for a player
-  private getPlayerPreferences(playerAddress: string): NotificationPreference[] {
-    if (!this.preferences.has(playerAddress)) {
-      this.preferences.set(playerAddress, this.initializeDefaultPreferences(playerAddress));
-    }
-    return this.preferences.get(playerAddress)!;
+  private initializeDefaultPreferences(): void {
+    const defaultPreferences: NotificationPreference[] = [
+      { type: NotificationType.GAME_RESULT, enabled: true, email: false, push: false, inApp: true },
+      { type: NotificationType.TOURNAMENT_JOINED, enabled: true, email: false, push: false, inApp: true },
+      { type: NotificationType.TOURNAMENT_STARTED, enabled: true, email: false, push: false, inApp: true },
+      { type: NotificationType.TOURNAMENT_ENDED, enabled: true, email: false, push: false, inApp: true },
+      { type: NotificationType.TOURNAMENT_WON, enabled: true, email: false, push: false, inApp: true },
+      { type: NotificationType.ACHIEVEMENT_UNLOCKED, enabled: true, email: false, push: false, inApp: true },
+      { type: NotificationType.LEVEL_UP, enabled: true, email: false, push: false, inApp: true },
+      { type: NotificationType.REWARD_CLAIMED, enabled: true, email: false, push: false, inApp: true },
+      { type: NotificationType.SYSTEM, enabled: true, email: false, push: false, inApp: true }
+    ];
+
+    this.preferences.set('default', defaultPreferences);
   }
 
-  // Update notification preferences
-  async updatePreferences(
-    playerAddress: string,
-    preferences: Partial<NotificationPreference>[]
-  ): Promise<void> {
-    const currentPreferences = this.getPlayerPreferences(playerAddress);
-    
-    preferences.forEach(pref => {
-      const index = currentPreferences.findIndex(p => p.type === pref.type);
-      if (index !== -1) {
-        currentPreferences[index] = {
-          ...currentPreferences[index],
-          ...pref
-        };
-      }
-    });
-
-    this.preferences.set(playerAddress, currentPreferences);
+  public registerWebSocket(playerAddress: string, ws: WebSocket): void {
+    this.webSockets.set(playerAddress, ws);
   }
 
-  // Create a new notification
-  async createNotification(
-    type: NotificationType,
-    recipient: string,
-    message: string,
-    data?: any,
-    tournamentId?: string
-  ): Promise<Notification> {
-    const preferences = this.getPlayerPreferences(recipient);
-    const preference = preferences.find(p => p.type === type);
-
-    if (!preference?.enabled) {
-      throw new Error('Notification type is disabled for this player');
-    }
-
-    const notification: Notification = {
-      id: uuidv4(),
-      type,
-      tournamentId,
-      recipient,
-      message,
-      timestamp: new Date(),
-      read: false,
-      data
-    };
-
-    const playerNotifications = this.notifications.get(recipient) || [];
-    playerNotifications.push(notification);
-    this.notifications.set(recipient, playerNotifications);
-
-    // Send real-time notification if WebSocket connection exists
-    if (this.connections.has(recipient)) {
-      const ws = this.connections.get(recipient)!;
-      ws.send(JSON.stringify(notification));
-    }
-
-    return notification;
-  }
-
-  // Get notifications with pagination and filtering
-  async getNotifications(
+  public async getNotifications(
     playerAddress: string,
     options: {
       limit?: number;
@@ -146,8 +56,7 @@ export class NotificationService {
       notifications = notifications.filter(n => types.includes(n.type));
     }
 
-    // Sort by timestamp descending
-    notifications.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    notifications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
     return {
       notifications: notifications.slice(offset, offset + limit),
@@ -155,11 +64,7 @@ export class NotificationService {
     };
   }
 
-  // Mark notifications as read
-  async markAsRead(
-    playerAddress: string,
-    notificationIds: string[]
-  ): Promise<void> {
+  public async markAsRead(playerAddress: string, notificationIds: string[]): Promise<void> {
     const notifications = this.notifications.get(playerAddress) || [];
     
     notifications.forEach(notification => {
@@ -171,118 +76,148 @@ export class NotificationService {
     this.notifications.set(playerAddress, notifications);
   }
 
-  // Register WebSocket connection for real-time notifications
-  registerConnection(address: string, ws: WebSocket): void {
-    this.connections.set(address, ws);
-    
-    ws.on('close', () => {
-      this.connections.delete(address);
+  public async notifyGameResult(playerAddress: string, gameId: string, outcome: string): Promise<void> {
+    const notification: Notification = {
+      id: crypto.randomUUID(),
+      type: NotificationType.GAME_RESULT,
+      recipientAddress: playerAddress,
+      title: 'Game Result',
+      message: `Your game ${gameId} resulted in a ${outcome}`,
+      data: { gameId, outcome },
+      read: false,
+      createdAt: new Date()
+    };
+
+    await this.sendNotification(playerAddress, notification);
+  }
+
+  public async notifyTournamentJoined(playerAddress: string, tournamentId: string): Promise<void> {
+    const notification: Notification = {
+      id: crypto.randomUUID(),
+      type: NotificationType.TOURNAMENT_JOINED,
+      recipientAddress: playerAddress,
+      title: 'Tournament Joined',
+      message: `You have joined tournament ${tournamentId}`,
+      data: { tournamentId },
+      read: false,
+      createdAt: new Date()
+    };
+
+    await this.sendNotification(playerAddress, notification);
+  }
+
+  public async notifyTournamentWon(playerAddress: string, tournamentId: string, prize: string): Promise<void> {
+    const notification: Notification = {
+      id: crypto.randomUUID(),
+      type: NotificationType.TOURNAMENT_WON,
+      recipientAddress: playerAddress,
+      title: 'Tournament Victory',
+      message: `Congratulations! You won tournament ${tournamentId} and earned ${prize}`,
+      data: { tournamentId, prize },
+      read: false,
+      createdAt: new Date()
+    };
+
+    await this.sendNotification(playerAddress, notification);
+  }
+
+  public async notifyAchievementUnlocked(playerAddress: string, achievement: any, reward: string): Promise<void> {
+    const notification: Notification = {
+      id: crypto.randomUUID(),
+      type: NotificationType.ACHIEVEMENT_UNLOCKED,
+      recipientAddress: playerAddress,
+      title: 'Achievement Unlocked',
+      message: `You unlocked the ${achievement.name} achievement!`,
+      data: { achievement, reward },
+      read: false,
+      createdAt: new Date()
+    };
+
+    await this.sendNotification(playerAddress, notification);
+  }
+
+  public async notifyLevelUp(playerAddress: string, level: number, rewards: string[]): Promise<void> {
+    const notification: Notification = {
+      id: crypto.randomUUID(),
+      type: NotificationType.LEVEL_UP,
+      recipientAddress: playerAddress,
+      title: 'Level Up!',
+      message: `Congratulations! You've reached level ${level}!`,
+      data: { level, rewards },
+      read: false,
+      createdAt: new Date()
+    };
+
+    await this.sendNotification(playerAddress, notification);
+  }
+
+  public async notifyCategoryRecommendation(playerAddress: string, category: string): Promise<void> {
+    const notification: Notification = {
+      id: crypto.randomUUID(),
+      type: NotificationType.SYSTEM,
+      recipientAddress: playerAddress,
+      title: 'Category Recommendation',
+      message: `We recommend trying the ${category} category based on your play style`,
+      data: { category },
+      read: false,
+      createdAt: new Date()
+    };
+
+    await this.sendNotification(playerAddress, notification);
+  }
+
+  public async notifyRegistrationOpen(tournament: any): Promise<void> {
+    const notification: Notification = {
+      id: crypto.randomUUID(),
+      type: NotificationType.TOURNAMENT_STARTED,
+      recipientAddress: 'all',
+      title: 'Tournament Registration Open',
+      message: `Registration is now open for tournament ${tournament.name}`,
+      data: { tournament },
+      read: false,
+      createdAt: new Date()
+    };
+
+    await this.sendNotification('all', notification);
+  }
+
+  private async sendNotification(playerAddress: string, notification: Notification): Promise<void> {
+    // Store notification
+    const playerNotifications = this.notifications.get(playerAddress) || [];
+    playerNotifications.push(notification);
+    this.notifications.set(playerAddress, playerNotifications);
+
+    // Send via WebSocket if available
+    const ws = this.webSockets.get(playerAddress);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(notification));
+    }
+  }
+
+  public async getPlayerNotifications(playerAddress: string): Promise<Notification[]> {
+    return this.notifications.get(playerAddress) || [];
+  }
+
+  public async getTournamentNotifications(tournamentId: string): Promise<Notification[]> {
+    const allNotifications: Notification[] = [];
+    this.notifications.forEach(notifications => {
+      notifications.forEach(notification => {
+        if (notification.data?.tournamentId === tournamentId) {
+          allNotifications.push(notification);
+        }
+      });
     });
+    return allNotifications;
   }
 
-  // Existing notification methods updated to use new structure
-  async notifyTournamentStart(tournament: Tournament): Promise<void> {
-    const players = await this.getRegisteredPlayers(tournament.id);
-    await Promise.all(players.map(player => 
-      this.createNotification(
-        'tournament_start',
-        player,
-        `Tournament "${tournament.name}" has started!`,
-        { tournament },
-        tournament.id
-      )
-    ));
+  public async getPlayerPreferences(playerAddress: string): Promise<NotificationPreference[]> {
+    return this.preferences.get(playerAddress) || this.preferences.get('default') || [];
   }
 
-  // ... Update other existing notification methods similarly ...
-
-  // New notification types
-  async notifyGameInvite(
-    sender: string,
-    recipient: string,
-    gameId: string,
-    gameName: string
-  ): Promise<void> {
-    await this.createNotification(
-      'game_invite',
-      recipient,
-      `${sender} has invited you to play ${gameName}`,
-      { sender, gameId, gameName }
-    );
-  }
-
-  async notifyAchievementUnlocked(
+  public async updatePreferences(
     playerAddress: string,
-    achievementName: string,
-    reward: string
+    preferences: NotificationPreference[]
   ): Promise<void> {
-    await this.createNotification(
-      'achievement_unlocked',
-      playerAddress,
-      `Congratulations! You've unlocked the "${achievementName}" achievement!`,
-      { achievementName, reward }
-    );
-  }
-
-  async notifyLevelUp(
-    playerAddress: string,
-    newLevel: number,
-    rewards: string[]
-  ): Promise<void> {
-    await this.createNotification(
-      'level_up',
-      playerAddress,
-      `Level Up! You've reached level ${newLevel}!`,
-      { newLevel, rewards }
-    );
-  }
-
-  async notifyRewardAvailable(
-    playerAddress: string,
-    rewardName: string,
-    amount: string
-  ): Promise<void> {
-    await this.createNotification(
-      'reward_available',
-      playerAddress,
-      `New reward available: ${rewardName} (${amount})`,
-      { rewardName, amount }
-    );
-  }
-
-  // Helper method to get registered players (to be implemented)
-  private async getRegisteredPlayers(tournamentId: string): Promise<string[]> {
-    // TODO: Implement actual player retrieval
-    return [];
-  }
-
-  async notifyTournamentJoined(playerAddress: string, tournamentId: string): Promise<void> {
-    const ws = this.connections.get(playerAddress);
-    if (ws) {
-      ws.send(JSON.stringify({
-        type: 'tournament_joined',
-        data: { tournamentId }
-      }));
-    }
-  }
-
-  async notifyTournamentWon(playerAddress: string, tournamentId: string, prize: string): Promise<void> {
-    const ws = this.connections.get(playerAddress);
-    if (ws) {
-      ws.send(JSON.stringify({
-        type: 'tournament_won',
-        data: { tournamentId, prize }
-      }));
-    }
-  }
-
-  async notifyGameResult(playerAddress: string, gameId: string, outcome: 'win' | 'lose' | 'draw'): Promise<void> {
-    const ws = this.connections.get(playerAddress);
-    if (ws) {
-      ws.send(JSON.stringify({
-        type: 'game_result',
-        data: { gameId, outcome }
-      }));
-    }
+    this.preferences.set(playerAddress, preferences);
   }
 } 

@@ -1,28 +1,6 @@
-import { ContractService } from './contracts';
+import { PlayerStats } from '../types/game';
+import { ContractService } from './contractService';
 import { TournamentHistoryService } from './tournamentHistoryService';
-
-export type PlayerStats = {
-  address: string;
-  totalGames: number;
-  wins: number;
-  losses: number;
-  draws: number;
-  winRate: number;
-  totalBetAmount: bigint;
-  totalWonAmount: bigint;
-  averageBet: bigint;
-  tournamentsPlayed: number;
-  tournamentsWon: number;
-  tournamentWinRate: number;
-  totalTournamentPrize: bigint;
-  achievements: Achievement[];
-  rank: number;
-  streak: {
-    current: number;
-    best: number;
-    type: 'win' | 'loss';
-  };
-};
 
 export type Achievement = {
   id: string;
@@ -35,104 +13,105 @@ export type Achievement = {
 };
 
 export class PlayerStatsService {
+  private stats: Map<string, PlayerStats> = new Map();
   private contractService: ContractService;
   private historyService: TournamentHistoryService;
   private achievements: Map<string, Achievement[]> = new Map();
 
-  constructor() {
-    this.contractService = new ContractService();
+  constructor(contractService: ContractService) {
+    this.contractService = contractService;
     this.historyService = new TournamentHistoryService();
   }
 
-  async getPlayerStats(address: string): Promise<PlayerStats> {
-    try {
-      const basicStats = await this.contractService.getPlayerStats(address);
-      const tournamentHistory = await this.historyService.getPlayerTournamentHistory(address);
-      
-      const tournamentsWon = tournamentHistory.filter(h => 
-        h.winners.some(w => w.address === address)
-      ).length;
-
-      const totalTournamentPrize = tournamentHistory.reduce((sum, h) => {
-        const winner = h.winners.find(w => w.address === address);
-        return sum + (winner?.prize || BigInt(0));
-      }, BigInt(0));
-
-      const achievements = await this.getPlayerAchievements(address);
-      const streak = await this.calculatePlayerStreak(address);
-
-      return {
-        address,
-        totalGames: basicStats.totalGames,
-        wins: basicStats.wins,
-        losses: basicStats.losses,
-        draws: basicStats.draws,
-        winRate: basicStats.winRate,
-        totalBetAmount: basicStats.totalBetAmount,
-        totalWonAmount: basicStats.totalWonAmount,
-        averageBet: basicStats.averageBet,
-        tournamentsPlayed: tournamentHistory.length,
-        tournamentsWon,
-        tournamentWinRate: tournamentHistory.length > 0 ? tournamentsWon / tournamentHistory.length : 0,
-        totalTournamentPrize,
-        achievements,
-        rank: await this.calculatePlayerRank(address),
-        streak
-      };
-    } catch (error) {
-      console.error('Error getting player stats:', error);
-      throw error;
+  public async getPlayerStats(address: string): Promise<PlayerStats> {
+    if (!this.stats.has(address)) {
+      await this.initializePlayerStats(address);
     }
+    return this.stats.get(address)!;
   }
 
-  private async calculatePlayerStreak(address: string): Promise<PlayerStats['streak']> {
-    const games = await this.contractService.getPlayerGameHistory(address);
+  private async initializePlayerStats(address: string): Promise<void> {
+    const games = await this.contractService.getGameHistory(address);
+    const stats = await this.calculateStats(address, games);
+    this.stats.set(address, stats);
+  }
+
+  private async calculateStats(address: string, games: bigint[]): Promise<PlayerStats> {
+    let totalGames = 0;
+    let wins = 0;
+    let losses = 0;
+    let draws = 0;
+    let totalBetAmount = BigInt(0);
+    let totalWinAmount = BigInt(0);
+    let highestWin = BigInt(0);
     let currentStreak = 0;
     let bestStreak = 0;
-    let currentType: 'win' | 'loss' = 'win';
-    let lastOutcome = games[0]?.outcome;
+    let lastGamePlayed = new Date(0);
 
-    for (const game of games) {
-      if (game.outcome === lastOutcome) {
-        currentStreak++;
-        if (currentStreak > bestStreak) {
-          bestStreak = currentStreak;
-          currentType = game.outcome === 'win' ? 'win' : 'loss';
-        }
+    for (const gameId of games) {
+      const outcome = await this.contractService.getGameOutcome(gameId);
+      totalGames++;
+
+      if (outcome === 'win') {
+        wins++;
+        currentStreak = Math.max(0, currentStreak) + 1;
+        bestStreak = Math.max(bestStreak, currentStreak);
+      } else if (outcome === 'lose') {
+        losses++;
+        currentStreak = Math.min(0, currentStreak) - 1;
       } else {
-        currentStreak = 1;
-        lastOutcome = game.outcome;
+        draws++;
+        currentStreak = 0;
       }
+
+      // TODO: Get bet amount and win amount from contract
+      const betAmount = BigInt(0);
+      const winAmount = BigInt(0);
+      totalBetAmount += betAmount;
+      totalWinAmount += winAmount;
+      highestWin = winAmount > highestWin ? winAmount : highestWin;
+
+      // Update last game played
+      const timestamp = await this.contractService.getLastGamePlayed(address);
+      lastGamePlayed = new Date(Math.max(lastGamePlayed.getTime(), timestamp.getTime()));
     }
 
     return {
-      current: currentStreak,
-      best: bestStreak,
-      type: currentType
+      address,
+      totalGames,
+      wins,
+      losses,
+      draws,
+      totalBetAmount,
+      totalWinAmount,
+      winRate: totalGames > 0 ? wins / totalGames : 0,
+      highestWin,
+      currentStreak,
+      bestStreak,
+      lastGamePlayed,
+      averageBet: totalGames > 0 ? totalBetAmount / BigInt(totalGames) : BigInt(0),
+      level: 1,
+      experience: 0,
+      rank: 'Bronze'
     };
   }
 
-  private async calculatePlayerRank(address: string): Promise<number> {
-    const allPlayers = await this.contractService.getAllPlayers();
-    const playerStats = await Promise.all(
-      allPlayers.map(async (player) => {
-        const stats = await this.getPlayerStats(player);
-        return {
-          address: player,
-          winRate: stats.winRate,
-          totalWon: stats.totalWonAmount
-        };
-      })
-    );
+  public async updateStats(address: string, update: Partial<PlayerStats>): Promise<void> {
+    const currentStats = await this.getPlayerStats(address);
+    this.stats.set(address, { ...currentStats, ...update });
+  }
 
-    playerStats.sort((a, b) => {
+  public async getLeaderboard(): Promise<PlayerStats[]> {
+    const allStats = Array.from(this.stats.values());
+    return allStats.sort((a, b) => {
       if (a.winRate !== b.winRate) {
         return b.winRate - a.winRate;
       }
-      return Number(b.totalWon - a.totalWon);
+      if (a.totalWinAmount !== b.totalWinAmount) {
+        return Number(b.totalWinAmount - a.totalWinAmount);
+      }
+      return b.totalGames - a.totalGames;
     });
-
-    return playerStats.findIndex(p => p.address === address) + 1;
   }
 
   async getPlayerAchievements(address: string): Promise<Achievement[]> {
@@ -143,11 +122,11 @@ export class PlayerStatsService {
     achievements.push({
       id: 'win_streak',
       name: 'Hot Streak',
-      description: `Win ${stats.streak.best} games in a row`,
+      description: `Win ${stats.bestStreak} games in a row`,
       unlockedAt: new Date(),
-      progress: stats.streak.best,
+      progress: stats.bestStreak,
       maxProgress: 10,
-      isUnlocked: stats.streak.best >= 10
+      isUnlocked: stats.bestStreak >= 10
     });
 
     // Tournament Winner Achievement
@@ -201,7 +180,7 @@ export class PlayerStatsService {
           address: player,
           rank: stats.rank,
           winRate: stats.winRate,
-          totalWon: stats.totalWonAmount,
+          totalWon: stats.totalWinAmount,
           tournamentsWon: stats.tournamentsWon
         };
       })
@@ -258,7 +237,7 @@ export class PlayerStatsService {
     experience += stats.tournamentsWon * 100;
     
     // Streak bonus
-    experience += stats.streak.best * 5;
+    experience += stats.bestStreak * 5;
     
     // Achievement bonus
     const achievements = stats.achievements.filter(a => a.isUnlocked);

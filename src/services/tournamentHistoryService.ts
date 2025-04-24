@@ -1,31 +1,31 @@
 import { ContractService } from './contracts';
-import { Tournament } from '../types/tournament';
+import { Tournament, TournamentStats } from '../types/tournament';
+import { PlayerStats } from '../types/game';
 
-export type TournamentHistory = {
+interface TournamentHistory {
   tournamentId: string;
   name: string;
   startTime: Date;
   endTime: Date;
-  totalPlayers: number;
-  prizePool: bigint;
+  entryFee: string;
+  prizePool: string;
+  players: string[];
   winners: {
     address: string;
+    prize: string;
     rank: number;
-    prize: bigint;
   }[];
-  playerStats: {
-    address: string;
-    gamesPlayed: number;
-    wins: number;
-    losses: number;
-    totalBet: bigint;
-    totalWon: bigint;
-  }[];
-};
+  stats: {
+    totalPlayers: number;
+    totalPrizePool: string;
+    averageEntryFee: string;
+    winRate: number;
+  };
+}
 
 export class TournamentHistoryService {
   private contractService: ContractService;
-  private history: Map<string, TournamentHistory> = new Map();
+  private history: Map<string, TournamentHistory[]> = new Map();
 
   constructor() {
     this.contractService = new ContractService();
@@ -56,17 +56,27 @@ export class TournamentHistoryService {
         name: tournament.name,
         startTime: tournament.startTime,
         endTime: tournament.endTime,
-        totalPlayers: players.length,
-        prizePool: tournament.prizePool,
+        entryFee: tournament.entryFee,
+        prizePool: tournament.prizePool || '0',
+        players: players,
         winners: winners.map((winner, index) => ({
           address: winner.address,
-          rank: index + 1,
-          prize: winner.amount
+          prize: winner.amount.toString(),
+          rank: index + 1
         })),
-        playerStats
+        stats: {
+          totalPlayers: players.length,
+          totalPrizePool: tournament.prizePool || '0',
+          averageEntryFee: tournament.entryFee,
+          winRate: winners.length > 0 ? winners.length / players.length : 0
+        }
       };
 
-      this.history.set(tournamentId, history);
+      for (const player of players) {
+        const playerHistory = this.history.get(player) || [];
+        playerHistory.push(history);
+        this.history.set(player, playerHistory);
+      }
     } catch (error) {
       console.error('Error recording tournament history:', error);
       throw error;
@@ -84,7 +94,7 @@ export class TournamentHistoryService {
     const histories = Array.from(this.history.values());
     return histories
       .filter(history => 
-        history.playerStats.some(stat => stat.address === address) ||
+        history.players.some(p => p === address) ||
         history.winners.some(winner => winner.address === address)
       )
       .slice(0, limit);
@@ -108,7 +118,7 @@ export class TournamentHistoryService {
       history.winners.forEach(winner => {
         const stats = playerStats.get(winner.address) || { tournamentsWon: 0, totalPrize: BigInt(0) };
         stats.tournamentsWon++;
-        stats.totalPrize += winner.prize;
+        stats.totalPrize += BigInt(winner.prize);
         playerStats.set(winner.address, stats);
       });
     });
@@ -125,10 +135,10 @@ export class TournamentHistoryService {
     return {
       totalTournaments: histories.length,
       totalPlayers: new Set(
-        histories.flatMap(h => h.playerStats.map(p => p.address))
+        histories.flatMap(h => h.players)
       ).size,
-      totalPrizePool: histories.reduce((sum, h) => sum + h.prizePool, BigInt(0)),
-      averagePlayersPerTournament: histories.reduce((sum, h) => sum + h.totalPlayers, 0) / histories.length,
+      totalPrizePool: histories.reduce((sum, h) => sum + BigInt(h.prizePool), BigInt(0)),
+      averagePlayersPerTournament: histories.reduce((sum, h) => sum + h.players.length, 0) / histories.length,
       mostSuccessfulPlayers
     };
   }
@@ -159,8 +169,8 @@ export class TournamentHistoryService {
       };
 
       stats.tournaments++;
-      stats.players += history.totalPlayers;
-      stats.prizePool += history.prizePool;
+      stats.players += history.players.length;
+      stats.prizePool += BigInt(history.prizePool);
       dailyStats.set(date, stats);
     });
 
@@ -179,6 +189,69 @@ export class TournamentHistoryService {
         date,
         amount: dailyStats.get(date)!.prizePool
       }))
+    };
+  }
+
+  public async getPlayerHistory(address: string): Promise<TournamentHistory[]> {
+    return this.history.get(address) || [];
+  }
+
+  public async getPlayerStats(address: string): Promise<{
+    totalTournaments: number;
+    tournamentsWon: number;
+    totalPrize: string;
+    winRate: number;
+  }> {
+    const history = await this.getPlayerHistory(address);
+    const tournamentsWon = history.filter(h => 
+      h.winners.some(w => w.address === address)
+    ).length;
+
+    const totalPrize = history.reduce((sum, h) => {
+      const winner = h.winners.find(w => w.address === address);
+      return winner ? BigInt(sum) + BigInt(winner.prize) : BigInt(sum);
+    }, BigInt(0)).toString();
+
+    return {
+      totalTournaments: history.length,
+      tournamentsWon,
+      totalPrize,
+      winRate: history.length > 0 ? tournamentsWon / history.length : 0
+    };
+  }
+
+  public async getTournamentStats(): Promise<TournamentStats> {
+    let totalTournaments = 0;
+    let activeTournaments = 0;
+    let completedTournaments = 0;
+    let totalPrizePool = BigInt(0);
+    let totalEntryFees = BigInt(0);
+    let totalPlayers = 0;
+
+    this.history.forEach(playerHistory => {
+      playerHistory.forEach(tournament => {
+        totalTournaments++;
+        if (tournament.endTime > new Date()) {
+          activeTournaments++;
+        } else {
+          completedTournaments++;
+        }
+        totalPrizePool += BigInt(tournament.prizePool);
+        totalEntryFees += BigInt(tournament.entryFee) * BigInt(tournament.players.length);
+        totalPlayers += tournament.players.length;
+      });
+    });
+
+    return {
+      totalTournaments,
+      activeTournaments,
+      completedTournaments,
+      totalPrizePool: totalPrizePool.toString(),
+      averageEntryFee: totalTournaments > 0 
+        ? (totalEntryFees / BigInt(totalTournaments)).toString()
+        : '0',
+      playerCount: totalPlayers,
+      averagePlayerCount: totalTournaments > 0 ? totalPlayers / totalTournaments : 0
     };
   }
 } 

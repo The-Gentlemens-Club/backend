@@ -1,18 +1,54 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ethers } from 'ethers';
-import { UserProfile, UserSettings, UserStats, UserSession } from '../types/user';
+import { UserProfile, UserSettings, UserStats, UserSession, NotificationType } from '../types/user';
 import { NotificationService } from './notificationService';
 
 export class UserService {
   private users: Map<string, UserProfile> = new Map();
   private sessions: Map<string, UserSession> = new Map();
-  private notificationService: NotificationService;
 
-  constructor(notificationService: NotificationService) {
-    this.notificationService = notificationService;
+  constructor(private notificationService: NotificationService) {}
+
+  public async getUserProfile(address: string): Promise<UserProfile | undefined> {
+    return this.users.get(address);
   }
 
-  // Initialize a new user profile
+  public async getUserStats(address: string): Promise<UserStats | undefined> {
+    const profile = await this.getUserProfile(address);
+    return profile?.stats;
+  }
+
+  public async getAllUsers(): Promise<UserProfile[]> {
+    return Array.from(this.users.values());
+  }
+
+  public async createProfile(address: string): Promise<UserProfile> {
+    const profile = this.initializeUserProfile(address);
+    this.users.set(address, profile);
+    return profile;
+  }
+
+  public async updateStats(address: string, update: Partial<UserStats>): Promise<void> {
+    const profile = await this.getUserProfile(address);
+    if (!profile) return;
+
+    const oldLevel = profile.stats.level;
+    profile.stats = { ...profile.stats, ...update };
+
+    // Check for level up
+    const newLevel = this.calculateLevel(profile.stats.experience);
+    if (newLevel > oldLevel) {
+      profile.stats.level = newLevel;
+      await this.notificationService.notifyLevelUp(
+        address,
+        newLevel,
+        this.getLevelRewards(newLevel)
+      );
+    }
+
+    this.users.set(address, profile);
+  }
+
   private initializeUserProfile(address: string): UserProfile {
     return {
       address,
@@ -53,163 +89,70 @@ export class UserService {
     };
   }
 
-  // Register a new user
-  async registerUser(address: string, username: string): Promise<UserProfile> {
-    if (!ethers.isAddress(address)) {
-      throw new Error('Invalid Ethereum address');
-    }
-
-    if (this.users.has(address)) {
-      throw new Error('User already exists');
-    }
-
-    const profile = this.initializeUserProfile(address);
-    this.users.set(address, profile);
-
-    // Send welcome notification
-    await this.notificationService.notifyAchievementUnlocked(
-      address,
-      'Welcome Bonus',
-      '100 XP'
-    );
-
-    return profile;
+  private calculateLevel(experience: number): number {
+    // Simple level calculation: each level requires 1000 XP
+    return Math.floor(experience / 1000) + 1;
   }
 
-  // Get user profile
-  async getUserProfile(address: string): Promise<UserProfile | null> {
-    return this.users.get(address) || null;
-  }
-
-  // Update user profile
-  async updateProfile(
-    address: string,
-    updates: Partial<UserProfile>
-  ): Promise<UserProfile> {
-    const profile = await this.getUserProfile(address);
-    if (!profile) {
-      throw new Error('User not found');
-    }
-
-    const updatedProfile = { ...profile, ...updates };
-    this.users.set(address, updatedProfile);
-
-    return updatedProfile;
-  }
-
-  // Update user settings
-  async updateSettings(
-    address: string,
-    settings: Partial<UserSettings>
-  ): Promise<UserSettings> {
-    const profile = await this.getUserProfile(address);
-    if (!profile) {
-      throw new Error('User not found');
-    }
-
-    const updatedSettings = { ...profile.settings, ...settings };
-    profile.settings = updatedSettings;
-    this.users.set(address, profile);
-
-    return updatedSettings;
-  }
-
-  // Update user stats
-  async updateStats(
-    address: string,
-    stats: Partial<UserStats>
-  ): Promise<UserStats> {
-    const profile = await this.getUserProfile(address);
-    if (!profile) {
-      throw new Error('User not found');
-    }
-
-    const updatedStats = { ...profile.stats, ...stats };
+  private getLevelRewards(level: number): string[] {
+    const rewards = [];
     
-    // Calculate win rate
-    if (stats.wins !== undefined || stats.losses !== undefined || stats.draws !== undefined) {
-      const totalGames = updatedStats.wins + updatedStats.losses + updatedStats.draws;
-      updatedStats.winRate = totalGames > 0 
-        ? (updatedStats.wins / totalGames) * 100 
-        : 0;
+    // Basic rewards for each level
+    rewards.push(`${level * 100} Bonus Points`);
+    
+    // Special rewards at milestone levels
+    if (level % 5 === 0) {
+      rewards.push('Special Avatar Frame');
+    }
+    if (level % 10 === 0) {
+      rewards.push('Exclusive Title');
+    }
+    if (level % 25 === 0) {
+      rewards.push('Rare Collectible');
     }
 
-    // Update level based on experience
-    if (stats.experience !== undefined) {
-      const newLevel = Math.floor(updatedStats.experience / 1000) + 1;
-      if (newLevel > updatedStats.level) {
-        updatedStats.level = newLevel;
-        await this.notificationService.notifyLevelUp(
-          address,
-          newLevel,
-          [`${newLevel * 100} XP`, 'New Avatar']
-        );
-      }
-    }
-
-    profile.stats = updatedStats;
-    this.users.set(address, profile);
-
-    return updatedStats;
+    return rewards;
   }
 
-  // Create a new session
-  async createSession(
-    address: string,
-    deviceInfo?: { userAgent: string; ip: string }
-  ): Promise<UserSession> {
-    const profile = await this.getUserProfile(address);
-    if (!profile) {
-      throw new Error('User not found');
-    }
-
+  public async createSession(address: string, deviceInfo?: { userAgent: string; ip: string }): Promise<UserSession> {
     const session: UserSession = {
-      id: uuidv4(),
+      id: crypto.randomUUID(),
       address,
-      token: uuidv4(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      token: crypto.randomUUID(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
       lastActivity: new Date(),
       deviceInfo
     };
 
     this.sessions.set(session.token, session);
-    profile.lastLogin = new Date();
-    this.users.set(address, profile);
-
     return session;
   }
 
-  // Validate session
-  async validateSession(token: string): Promise<UserSession | null> {
+  public async validateSession(token: string): Promise<UserSession | undefined> {
     const session = this.sessions.get(token);
-    if (!session) {
-      return null;
+    if (!session || session.expiresAt < new Date()) {
+      return undefined;
     }
-
-    if (session.expiresAt < new Date()) {
-      this.sessions.delete(token);
-      return null;
-    }
-
-    session.lastActivity = new Date();
     return session;
   }
 
-  // End session
-  async endSession(token: string): Promise<void> {
+  public async updateSession(token: string): Promise<void> {
+    const session = this.sessions.get(token);
+    if (session) {
+      session.lastActivity = new Date();
+      this.sessions.set(token, session);
+    }
+  }
+
+  public async endSession(token: string): Promise<void> {
     this.sessions.delete(token);
   }
 
-  // Get all active sessions for a user
-  async getUserSessions(address: string): Promise<UserSession[]> {
-    return Array.from(this.sessions.values())
-      .filter(session => session.address === address);
-  }
-
-  // End all sessions for a user
-  async endAllSessions(address: string): Promise<void> {
-    Array.from(this.sessions.entries())
-      .filter(([_, session]) => session.address === address)
-      .forEach(([token]) => this.sessions.delete(token));
+  public async endAllSessions(address: string): Promise<void> {
+    for (const [token, session] of this.sessions.entries()) {
+      if (session.address === address) {
+        this.sessions.delete(token);
+      }
+    }
   }
 } 
