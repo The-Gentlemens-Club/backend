@@ -1,66 +1,86 @@
 import { TournamentRules } from '../types/tournament';
 
 export class TournamentRulesService {
-  private rules: Map<string, TournamentRules> = new Map();
+  private rules: Map<string, TournamentRules>;
 
-  constructor() {}
+  constructor() {
+    this.rules = new Map<string, TournamentRules>();
+  }
 
-  public async setRules(tournamentId: string, rules: TournamentRules): Promise<void> {
+  public setRules(tournamentId: string, rules: TournamentRules): void {
+    if (!this.validateRules(rules)) {
+      throw new Error('Invalid tournament rules');
+    }
     this.rules.set(tournamentId, rules);
   }
 
-  public async getRules(tournamentId: string): Promise<TournamentRules | null> {
-    return this.rules.get(tournamentId) || null;
+  public getRules(tournamentId: string): TournamentRules | undefined {
+    return this.rules.get(tournamentId);
   }
 
-  public async validateRules(rules: TournamentRules): Promise<boolean> {
-    if (!rules.minPlayers || !rules.maxPlayers) {
-      return false;
-    }
-
+  public validateRules(rules: TournamentRules): boolean {
+    // Basic validation
     if (rules.minPlayers < 2 || rules.maxPlayers < rules.minPlayers) {
       return false;
     }
 
-    if (rules.entryFee < 0n) {
+    if (rules.entryFee < BigInt(0) || rules.prizePool < rules.entryFee) {
       return false;
     }
 
-    if (rules.prizePool < 0n) {
+    if (rules.minBet < BigInt(0) || rules.maxBet < rules.minBet) {
       return false;
     }
 
-    if (rules.startTime && rules.endTime && rules.startTime >= rules.endTime) {
+    if (rules.timeLimit < 0 || rules.maxRounds < 1) {
       return false;
+    }
+
+    // Time validation if provided
+    if (rules.startTime && rules.endTime) {
+      const start = new Date(rules.startTime);
+      const end = new Date(rules.endTime);
+      if (start >= end) {
+        return false;
+      }
     }
 
     return true;
   }
 
-  public async updateRules(tournamentId: string, updates: Partial<TournamentRules>): Promise<TournamentRules | null> {
-    const currentRules = await this.getRules(tournamentId);
+  public updateRules(tournamentId: string, updates: Partial<TournamentRules>): void {
+    const currentRules = this.getRules(tournamentId);
     if (!currentRules) {
-      return null;
+      throw new Error('Tournament rules not found');
     }
 
-    const updatedRules: TournamentRules = {
-      ...currentRules,
-      ...updates
-    };
-
-    if (!(await this.validateRules(updatedRules))) {
-      return null;
+    const updatedRules = { ...currentRules, ...updates };
+    if (!this.validateRules(updatedRules)) {
+      throw new Error('Invalid tournament rules update');
     }
 
-    await this.setRules(tournamentId, updatedRules);
-    return updatedRules;
+    this.rules.set(tournamentId, updatedRules);
   }
 
-  public async deleteRules(tournamentId: string): Promise<boolean> {
-    return this.rules.delete(tournamentId);
+  public deleteRules(tournamentId: string): void {
+    this.rules.delete(tournamentId);
   }
 
-  public async listRules(): Promise<Map<string, TournamentRules>> {
+  public listRules(): Map<string, TournamentRules> {
     return new Map(this.rules);
+  }
+
+  public getDefaultRules(): TournamentRules {
+    return {
+      minPlayers: 2,
+      maxPlayers: 10,
+      entryFee: BigInt(100),
+      prizePool: BigInt(1000),
+      minBet: BigInt(10),
+      maxBet: BigInt(100),
+      timeLimit: 3600, // 1 hour in seconds
+      maxRounds: 100,
+      allowRebuys: false
+    };
   }
 } 
