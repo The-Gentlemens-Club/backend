@@ -39,7 +39,7 @@ export type Notification = {
 export class NotificationService {
   private notifications: Map<string, Notification[]> = new Map();
   private preferences: Map<string, NotificationPreference[]> = new Map();
-  private wsConnections: Map<string, WebSocket> = new Map();
+  private connections: Map<string, WebSocket> = new Map();
 
   // Initialize default preferences for a player
   private initializeDefaultPreferences(playerAddress: string): NotificationPreference[] {
@@ -111,8 +111,8 @@ export class NotificationService {
     this.notifications.set(recipient, playerNotifications);
 
     // Send real-time notification if WebSocket connection exists
-    if (this.wsConnections.has(recipient)) {
-      const ws = this.wsConnections.get(recipient)!;
+    if (this.connections.has(recipient)) {
+      const ws = this.connections.get(recipient)!;
       ws.send(JSON.stringify(notification));
     }
 
@@ -172,11 +172,11 @@ export class NotificationService {
   }
 
   // Register WebSocket connection for real-time notifications
-  registerWebSocket(playerAddress: string, ws: WebSocket): void {
-    this.wsConnections.set(playerAddress, ws);
+  registerConnection(address: string, ws: WebSocket): void {
+    this.connections.set(address, ws);
     
     ws.on('close', () => {
-      this.wsConnections.delete(playerAddress);
+      this.connections.delete(address);
     });
   }
 
@@ -254,5 +254,35 @@ export class NotificationService {
   private async getRegisteredPlayers(tournamentId: string): Promise<string[]> {
     // TODO: Implement actual player retrieval
     return [];
+  }
+
+  async notifyTournamentJoined(playerAddress: string, tournamentId: string): Promise<void> {
+    const ws = this.connections.get(playerAddress);
+    if (ws) {
+      ws.send(JSON.stringify({
+        type: 'tournament_joined',
+        data: { tournamentId }
+      }));
+    }
+  }
+
+  async notifyTournamentWon(playerAddress: string, tournamentId: string, prize: string): Promise<void> {
+    const ws = this.connections.get(playerAddress);
+    if (ws) {
+      ws.send(JSON.stringify({
+        type: 'tournament_won',
+        data: { tournamentId, prize }
+      }));
+    }
+  }
+
+  async notifyGameResult(playerAddress: string, gameId: string, outcome: 'win' | 'lose' | 'draw'): Promise<void> {
+    const ws = this.connections.get(playerAddress);
+    if (ws) {
+      ws.send(JSON.stringify({
+        type: 'game_result',
+        data: { gameId, outcome }
+      }));
+    }
   }
 } 

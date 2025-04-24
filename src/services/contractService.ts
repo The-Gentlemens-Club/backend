@@ -26,10 +26,27 @@ const GAME_ABI = [
   'event GamePlayed(address indexed player, uint256 indexed gameId, uint256 betAmount, uint8 outcome)'
 ];
 
+interface TournamentContract extends Contract {
+  createTournament: (name: string, entryFee: bigint, startTime: number) => Promise<ethers.ContractTransaction>;
+  joinTournament: (tournamentId: bigint, options: { value: bigint }) => Promise<ethers.ContractTransaction>;
+  getTournament: (tournamentId: bigint) => Promise<[string, bigint, bigint, bigint, bigint, number]>;
+  getTournamentPlayers: (tournamentId: bigint) => Promise<string[]>;
+  getTournamentWinners: (tournamentId: bigint) => Promise<[string[], bigint[]]>;
+  distributePrizes: (tournamentId: bigint) => Promise<ethers.ContractTransaction>;
+  getTournamentStatus: (tournamentId: bigint) => Promise<number>;
+}
+
+interface GameContract extends Contract {
+  playGame: (betAmount: bigint) => Promise<ethers.ContractTransaction>;
+  getGameHistory: (player: string) => Promise<bigint[]>;
+  getLastGamePlayed: (player: string) => Promise<bigint>;
+  getGameOutcome: (gameId: bigint) => Promise<number>;
+}
+
 export class ContractService {
   private provider: ethers.JsonRpcProvider;
-  private tournamentContract: Contract;
-  private gameContract: Contract;
+  private tournamentContract: TournamentContract;
+  private gameContract: GameContract;
   private tournamentService: TournamentService;
   private userService: UserService;
   private notificationService: NotificationService;
@@ -43,8 +60,8 @@ export class ContractService {
     notificationService: NotificationService
   ) {
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
-    this.tournamentContract = new Contract(tournamentContractAddress, TOURNAMENT_ABI, this.provider);
-    this.gameContract = new Contract(gameContractAddress, GAME_ABI, this.provider);
+    this.tournamentContract = new Contract(tournamentContractAddress, TOURNAMENT_ABI, this.provider) as TournamentContract;
+    this.gameContract = new Contract(gameContractAddress, GAME_ABI, this.provider) as GameContract;
     this.tournamentService = tournamentService;
     this.userService = userService;
     this.notificationService = notificationService;
@@ -80,7 +97,7 @@ export class ContractService {
 
     // Game events
     this.gameContract.on('GamePlayed', async (player, gameId, betAmount, outcome) => {
-      const outcomeStr = this.getGameOutcome(outcome);
+      const outcomeStr = this.getGameOutcomeString(outcome);
       await this.userService.updateStats(player, {
         totalGames: 1,
         [outcomeStr === 'win' ? 'wins' : outcomeStr === 'lose' ? 'losses' : 'draws']: 1,
@@ -168,7 +185,7 @@ export class ContractService {
 
   async getGameOutcome(gameId: bigint): Promise<string> {
     const outcome = await this.gameContract.getGameOutcome(gameId);
-    return this.getGameOutcome(outcome);
+    return this.getGameOutcomeString(outcome);
   }
 
   // Helper methods
@@ -181,7 +198,7 @@ export class ContractService {
     }
   }
 
-  private getGameOutcome(outcome: number): 'win' | 'lose' | 'draw' {
+  private getGameOutcomeString(outcome: number): 'win' | 'lose' | 'draw' {
     switch (outcome) {
       case 0: return 'win';
       case 1: return 'lose';

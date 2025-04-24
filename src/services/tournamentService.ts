@@ -3,6 +3,7 @@ import { Tournament, TournamentStatus } from '../types/tournament';
 
 export class TournamentService {
   private contractService: ContractService;
+  private tournaments: Map<string, Tournament> = new Map();
 
   constructor() {
     this.contractService = new ContractService();
@@ -173,5 +174,35 @@ export class TournamentService {
       console.error('Error getting tournament recommendations:', error);
       throw error;
     }
+  }
+
+  async createTournament(tournament: Tournament): Promise<void> {
+    this.tournaments.set(tournament.id, tournament);
+  }
+
+  async addPlayer(tournamentId: string, playerAddress: string): Promise<void> {
+    const tournament = this.tournaments.get(tournamentId);
+    if (!tournament) {
+      throw new Error('Tournament not found');
+    }
+    tournament.players.push(playerAddress);
+    this.tournaments.set(tournamentId, tournament);
+  }
+
+  async updateTournamentStatus(tournamentId: string, status: 'upcoming' | 'active' | 'completed'): Promise<void> {
+    const tournament = this.tournaments.get(tournamentId);
+    if (!tournament) {
+      throw new Error('Tournament not found');
+    }
+    tournament.status = status;
+    this.tournaments.set(tournamentId, tournament);
+  }
+
+  async getTournament(tournamentId: string): Promise<Tournament | undefined> {
+    return this.tournaments.get(tournamentId);
+  }
+
+  async getTournaments(): Promise<Tournament[]> {
+    return Array.from(this.tournaments.values());
   }
 } 

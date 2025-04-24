@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { ContractService } from '../services/contractService';
 import { authenticate, requireRole } from '../middleware/auth';
+import { UserService } from '../services/userService';
 
 const router = Router();
 
-export const initContractRoutes = (contractService: ContractService) => {
-  const auth = authenticate;
+export const initContractRoutes = (contractService: ContractService, userService: UserService) => {
+  const auth = authenticate(userService);
 
   // Tournament routes
   router.post('/tournaments', auth, requireRole(['admin']), async (req, res) => {

@@ -24,7 +24,7 @@ export const authenticate = (userService: UserService) => {
 
       const session = await userService.validateSession(token);
       if (!session) {
-        return res.status(401).json({ error: 'Invalid or expired token' });
+        return res.status(401).json({ error: 'Invalid session' });
       }
 
       const profile = await userService.getUserProfile(session.address);
@@ -40,7 +40,7 @@ export const authenticate = (userService: UserService) => {
       next();
     } catch (error) {
       console.error('Authentication error:', error);
-      res.status(500).json({ error: 'Authentication failed' });
+      res.status(401).json({ error: 'Authentication failed' });
     }
   };
 };
